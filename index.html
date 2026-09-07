@@ -68,6 +68,9 @@
   .note{font-size:11px;color:var(--dim);line-height:1.6;margin-top:8px}
   .foot{color:#5c6f9c;font-size:11px;text-align:center;padding:16px 0 30px;line-height:1.7}
   h4{margin:14px 0 6px;font-size:14px;color:#b9cdf5}
+  .routeMetric{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .metric{background:#0d1b38;border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:11px;color:#b9cdf5}
+  .metric b{color:#fff}
 </style>
 </head>
 <body>
@@ -88,7 +91,7 @@
   <section id="pnl1" class="panel on">
     <div class="status">
       <div class="st"><span>定位状态</span><b id="gpsSt">--</b></div>
-      <div class="st"><span>距景德镇市区(直线)</span><b id="distJdz">--</b></div>
+      <div class="st"><span>沿路线距景德镇</span><b id="distJdz">--</b></div>
       <div class="st"><span>车速</span><b id="speed">--</b></div>
       <div class="st"><span>已播报点数</span><b id="doneCnt">0</b></div>
     </div>
@@ -112,7 +115,7 @@
       <select id="simSel">
         <option value="">— 未模拟，使用真实 GPS —</option>
       </select>
-      <div class="note">选一个地点后会立即以该处触发一次播报逻辑，用于出发前预演。</div>
+      <div class="note">选一个地点后会立即以该处触发一次播报逻辑，用于出发前预演。真实导航会优先使用“沿路线距离”，不再单纯按直线距离触发。</div>
     </div>
 
     <div class="card">
@@ -361,6 +364,92 @@ var simPos = null;     // 模拟位置
 var map = null, mkrList = {};
 var distToJdz = "";
 
+/* ================= 路线距离模型 =================
+ * 目标：自动播报优先采用“车辆沿预设路线前进了多少公里”，而不是当前位置与 POI 的直线距离。
+ * WAYPOINTS 是人工设置的路线锚点，因此这里采用“分段投影 + 累积里程”的近似模型。
+ * 对不在主路线附近的点位，只有在路线走廊内才允许自动播报。
+ */
+var ROUTE = { points: [], cumulativeKm: [], totalKm: 0 };
+var ROUTE_CORRIDOR_DEFAULT = 8; // POI 距主路线超过该值时，不自动播报（手动点选仍可播报）
+var ANNOUNCE_AHEAD_KM = [5, 2, 0.5]; // 未来三个阶段：预告/临近/到达
+
+function toXY(lat, lng, refLat){
+  var kx = 111.32 * Math.cos(refLat * Math.PI / 180);
+  var ky = 111.32;
+  return {x: lng * kx, y: lat * ky};
+}
+
+function projectToSegment(px, py, ax, ay, bx, by){
+  var dx = bx-ax, dy = by-ay;
+  var len2 = dx*dx + dy*dy;
+  var t = len2 ? ((px-ax)*dx + (py-ay)*dy)/len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  var qx = ax + t*dx, qy = ay + t*dy;
+  var d = Math.hypot(px-qx, py-qy);
+  return {t:t, x:qx, y:qy, distKm:d};
+}
+
+function buildRouteModel(){
+  var pts = WAYPOINTS.map(function(p){ return {lat:p[0], lng:p[1]}; });
+  ROUTE.points = pts;
+  ROUTE.cumulativeKm = [0];
+  var total = 0;
+  for (var i=1;i<pts.length;i++) {
+    total += haversine(pts[i-1], pts[i]);
+    ROUTE.cumulativeKm.push(total);
+  }
+  ROUTE.totalKm = total;
+}
+
+function projectToRoute(lat,lng){
+  if (!ROUTE.points.length) buildRouteModel();
+  var best = null;
+  var refLat = lat;
+  var q = toXY(lat,lng,refLat);
+  for (var i=0;i<ROUTE.points.length-1;i++) {
+    var a = ROUTE.points[i], b = ROUTE.points[i+1];
+    var aa = toXY(a.lat,a.lng,refLat), bb = toXY(b.lat,b.lng,refLat);
+    var pr = projectToSegment(q.x,q.y,aa.x,aa.y,bb.x,bb.y);
+    if (!best || pr.distKm < best.crossTrackKm) {
+      var segKm = haversine(a,b);
+      best = {
+        segment:i,
+        t:pr.t,
+        crossTrackKm:pr.distKm,
+        routeKm:ROUTE.cumulativeKm[i] + segKm*pr.t
+      };
+    }
+  }
+  return best;
+}
+
+function ensureRouteMeta(){
+  if (!ROUTE.points.length) buildRouteModel();
+  POI.forEach(function(p){
+    if (p._routeKm == null || p._crossTrackKm == null){
+      var r = projectToRoute(p.lat,p.lng);
+      p._routeKm = r ? r.routeKm : Infinity;
+      p._crossTrackKm = r ? r.crossTrackKm : Infinity;
+      if (p.corridorKm == null) p.corridorKm = ROUTE_CORRIDOR_DEFAULT;
+    }
+  });
+}
+
+function routePosition(){
+  var c=currentPos();
+  if (!c) return null;
+  ensureRouteMeta();
+  var r=projectToRoute(c.lat,c.lng);
+  if (!r) return null;
+  return {routeKm:r.routeKm,crossTrackKm:r.crossTrackKm};
+}
+
+function routeAheadKm(p){
+  var rp=routePosition();
+  if (!rp || p._routeKm==null) return Infinity;
+  return p._routeKm-rp.routeKm;
+}
+
 function saveAnnounced(){ try{ localStorage.setItem("jx_jdz_announced", JSON.stringify(announced)); }catch(e){} }
 
 function haversine(a,b){
@@ -507,39 +596,72 @@ function getDist(p){
 }
 
 function trigger(p){
-  var d = getDist(p);
+  var directKm = getDist(p);
+  var aheadKm = routeAheadKm(p);
+  var corridor = (p.corridorKm==null ? ROUTE_CORRIDOR_DEFAULT : p.corridorKm);
+  var routeEligible = isFinite(aheadKm) && p._crossTrackKm <= corridor && aheadKm >= -0.5;
   var key = p.id;
-  var state = announced[key] ? "done" : (d<=p.r*3 ? "soon" : "");
-  return {p:p, d:d, state:state};
+  var state = announced[key] ? "done" : (routeEligible && aheadKm <= 5 ? "soon" : "");
+  return {p:p, d:directKm, aheadKm:aheadKm, crossTrackKm:p._crossTrackKm, routeEligible:routeEligible, state:state};
 }
 
 function allTriggers(){
-  return POI.map(trigger).sort(function(a,b){ return a.d-b.d; });
+  return POI.map(trigger).sort(function(a,b){
+    var da=isFinite(a.aheadKm)?a.aheadKm:Infinity, db=isFinite(b.aheadKm)?b.aheadKm:Infinity;
+    return da-db;
+  });
 }
 
 function doTick(){
   var c = currentPos();
   if (!c) return;
+  ensureRouteMeta();
+  var rp = routePosition();
   var list = allTriggers();
-  var near = list.filter(function(t){
-    return t.d <= t.p.r && t.state!=="done";
+
+  /*
+   * 核心变化：自动播报按“沿路线距离”触发。
+   * 5km 以内进入预告区，2km 以内临近，0.5km 以内视为到达。
+   * 同一轮最多播报一条，避免进入城区后同时播报酒店/美食/景点。
+   */
+  var candidates = list.filter(function(t){
+    return !announced[t.p.id] && t.routeEligible && t.aheadKm >= 0 && t.aheadKm <= 0.5;
   });
-  near.forEach(function(t){
+  if (!candidates.length) {
+    candidates = list.filter(function(t){
+      return !announced[t.p.id] && t.routeEligible && t.aheadKm >= 0 && t.aheadKm <= t.p.r;
+    });
+  }
+  if (running && candidates.length && !saying){
+    var t = candidates[0];
     announced[t.p.id] = true;
     saveAnnounced();
     var say = t.p.say || (t.p.name + "到了");
-    logAdd(t.p, "已播报 (距离"+fmtKm(t.d)+")");
-    if (running) enqueue(t.p, say);
-  });
+    logAdd(t.p, "已播报 · 沿路线约"+fmtKm(Math.max(0,t.aheadKm))+"前");
+    enqueue(t.p, say);
+  }
 
   // 更新 UI
-  var jdz = getDist(POI.find(function(p){return p.id==="jdz";}));
-  distToJdz = fmtKm(jdz);
-  document.getElementById("distJdz").textContent = distToJdz;
+  var jdz = POI.find(function(p){return p.id==="jdz";});
+  var jdzAhead = jdz ? routeAheadKm(jdz) : Infinity;
+  distToJdz = fmtKm(Math.max(0,jdzAhead));
+  document.getElementById("distJdz").textContent = isFinite(jdzAhead) ? (jdzAhead<=0 ? "已到达" : distToJdz) : "--";
   document.getElementById("speed").textContent = (c.speed!=null && c.speed>=0) ? Math.round(c.speed*3.6)+" km/h" : "--";
   var done = Object.keys(announced).length;
   document.getElementById("doneCnt").textContent = done;
-  refreshList(near);
+  refreshList(list.filter(function(t){ return t.routeEligible && t.aheadKm>=0 && t.aheadKm<=5; }).slice(0,5));
+
+  var next = list.find(function(t){ return !announced[t.p.id] && t.routeEligible && t.aheadKm>=0; });
+  var nextEl=document.getElementById("nextPoint");
+  if (nextEl){
+    if (next){
+      var stage = next.aheadKm<=0.5 ? "即将到达" : (next.aheadKm<=2 ? "近距离预告" : "提前预告");
+      nextEl.innerHTML = '<div><b>'+stage+' · '+next.p.name+'</b></div>' +
+        '<div class="routeMetric"><span class="metric">沿路线 <b>'+fmtKm(next.aheadKm)+'</b></span><span class="metric">偏离主路线 <b>'+fmtKm(next.crossTrackKm)+'</b></span><span class="metric">直线距离 <b>'+fmtKm(next.d)+'</b></span></div>';
+    } else {
+      nextEl.textContent = "当前路线前方暂无待播报点位。";
+    }
+  }
   if (map){
     list.forEach(function(t){ setMarker(t.p, t.state); });
   }
@@ -574,7 +696,9 @@ function refreshList(near){
   if (nearEl){
     nearEl.innerHTML = near.slice(0,5).map(function(t){
       var p=t.p;
-      return '<div class="item"><div style="flex:1"><span class="pill '+TYPE_PILL[p.type]+'">'+TYPE_TXT[p.type]+'</span><span class="pill day">Day'+p.day+'</span>'+(isTopSpot(p)?'<span class="pill top">⭐高分</span>':'')+'<span class="pill '+(announced[p.id]?"done":"soon")+'">'+(announced[p.id]?"已播报":"即将到达")+'</span><div class="nm">'+p.name+(p.rate!=null?' <b style="color:#ffb84d">★'+p.rate+'</b>':'')+'</div><div class="ds">'+p.desc+'</div></div><div class="dist">'+fmtKm(t.d)+'</div></div>';
+      var distText=isFinite(t.aheadKm) ? fmtKm(Math.max(0,t.aheadKm)) : fmtKm(t.d);
+      var status=announced[p.id]?"已播报":(t.aheadKm<=0.5?"即将到达":"前方");
+      return '<div class="item"><div style="flex:1"><span class="pill '+TYPE_PILL[p.type]+'">'+TYPE_TXT[p.type]+'</span><span class="pill day">Day'+p.day+'</span>'+(isTopSpot(p)?'<span class="pill top">⭐高分</span>':'')+'<span class="pill '+(announced[p.id]?"done":"soon")+'">'+status+'</span><div class="nm">'+p.name+(p.rate!=null?' <b style="color:#ffb84d">★'+p.rate+'</b>':'')+'</div><div class="ds">'+p.desc+' · 偏离主路线约'+fmtKm(t.crossTrackKm)+'</div></div><div class="dist">'+distText+'</div></div>';
     }).join("");
   }
 }
@@ -587,7 +711,7 @@ function renderAll(){
     var pillTop = (isTopSpot && isTopSpot(p)) ? '<span class="pill top">⭐高分</span>' : '';
     var rateTxt = (p.rate!=null) ? ' <b style="color:#ffb84d">★'+p.rate+'</b>' : '';
     var introHtml = (p.intro) ? '<span style="display:block;color:#b9cdf5;margin-top:2px">'+p.intro+'</span>' : '';
-    return '<div class="item" data-id="'+p.id+'"><div style="flex:1"><span class="pill '+TYPE_PILL[p.type]+'">'+TYPE_TXT[p.type]+'</span><span class="pill day">Day'+p.day+'</span>'+pillTop+'<span class="pill '+(announced[p.id]?"done":"soon")+'">'+(announced[p.id]?"已播报":"即将到达")+'</span><div class="nm">'+p.name+rateTxt+'</div><div class="ds">'+introHtml+p.desc+' (触发半径约'+p.r+'公里)</div></div><div class="dist">'+fmtKm(t.d)+'</div></div>';
+    return '<div class="item" data-id="'+p.id+'"><div style="flex:1"><span class="pill '+TYPE_PILL[p.type]+'">'+TYPE_TXT[p.type]+'</span><span class="pill day">Day'+p.day+'</span>'+pillTop+'<span class="pill '+(announced[p.id]?"done":"soon")+'">'+(announced[p.id]?"已播报":"前方")+'</span><div class="nm">'+p.name+rateTxt+'</div><div class="ds">'+introHtml+p.desc+' · 距主路线约'+fmtKm(p._crossTrackKm==null?0:p._crossTrackKm)+'</div></div><div class="dist">'+(isFinite(t.aheadKm)?fmtKm(Math.max(0,t.aheadKm)):fmtKm(t.d))+'</div></div>';
   }).join("");
 }
 
@@ -828,6 +952,8 @@ nearCard.className = "card";
 nearCard.innerHTML = '<h4>附近点位（按距离）</h4><div id="nearItems"><div class="note">定位生效后自动刷新。</div></div>';
 logCard.parentNode.insertBefore(nearCard, logCard);
 
+buildRouteModel();
+ensureRouteMeta();
 fillSim();
 fillVoices();
 setTimeout(fillVoices, 500);
