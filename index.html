@@ -108,6 +108,14 @@
       <div class="note">选一个地点后会立即以该处触发一次播报逻辑，用于出发前预演。</div>
     </div>
 
+    <div class="card">
+      <h4>语音设置（换好听的女声）</h4>
+      <select id="voiceSel">
+        <option value="">— 系统自动（优选女声）—</option>
+      </select>
+      <div class="note">iPhone 想要更自然的女声：设置 → 辅助功能 → 朗读内容 → 声音 → 中文（普通话），下载<b>"婷婷（增强）"或"婷婷（Premium）"</b>后，回到本页重新打开下拉框即可选到。选完会自动试听。</div>
+    </div>
+
     <div id="map"></div>
 
     <div class="card">
@@ -352,12 +360,57 @@ function haversine(a,b){
 }
 
 /* ================= 语音 ================= */
+var forcedVoice = "";
+try { forcedVoice = localStorage.getItem("jx_jdz_voice") || ""; } catch(e){ forcedVoice=""; }
 function pickVoice(){
   var vs = speechSynthesis.getVoices();
-  var zh = vs.find(v=>/zh[-_]?CN/i.test(v.lang)) || vs.find(v=>v.lang && v.lang.indexOf("zh")===0);
-  return zh || null;
+  if (!vs.length) return null;
+  if (forcedVoice){
+    var f = vs.find(function(v){ return v.name===forcedVoice; });
+    if (f) return f;
+  }
+  var zh = vs.filter(function(v){ return /^zh/i.test(v.lang||""); });
+  var pool = zh.length ? zh : vs;
+  function score(v){
+    var s = 0;
+    if (/enhanced|premium|siri voice|improved|neural/i.test(v.name)) s += 30;
+    if (/tingting|婷婷|meijia|yaoyao|lili|xiaoxiao|shanshan/i.test(v.name)) s += 20;
+    if (/zh-cn/i.test(v.lang||"")) s += 5;
+    return s;
+  }
+  pool.sort(function(a,b){ return score(b)-score(a); });
+  return pool[0];
 }
-if ('speechSynthesis' in window){ speechSynthesis.onvoiceschanged = pickVoice; }
+if ('speechSynthesis' in window){
+  speechSynthesis.onvoiceschanged = function(){ pickVoice(); fillVoices(); };
+}
+var voiceSelBound = false;
+function fillVoices(){
+  if (!('speechSynthesis' in window)) return;
+  var sel = document.getElementById("voiceSel");
+  if (!sel) return;
+  var vs = speechSynthesis.getVoices();
+  if (!vs.length) return;
+  sel.innerHTML = '<option value="">— 系统自动（优选女声）—</option>' + vs.map(function(v){
+    var name = String(v.name).replace(/"/g, "&quot;");
+    return '<option value="'+name+'">'+name+' ('+(v.lang||"")+')</option>';
+  }).join("");
+  sel.value = forcedVoice;
+  if (!voiceSelBound){
+    voiceSelBound = true;
+    sel.addEventListener("change", function(){
+      forcedVoice = sel.value;
+      try { localStorage.setItem("jx_jdz_voice", forcedVoice); } catch(e){}
+      if (forcedVoice){
+        speak("你选择了" + forcedVoice + "，测试成功。后面的播报都会用这个声音。");
+        showSay({name:"语音设置", type:"t", day:0}, "已切换到：" + forcedVoice + "。");
+      } else {
+        speak("已恢复系统自动选择，测试成功。");
+        showSay({name:"语音设置", type:"t", day:0}, "已恢复系统自动选择（优选好听的女声）。");
+      }
+    });
+  }
+}
 
 function speak(text){
   if (!('speechSynthesis' in window)) return false;
@@ -722,6 +775,8 @@ nearCard.innerHTML = '<h4>附近点位（按距离）</h4><div id="nearItems"><d
 logCard.parentNode.insertBefore(nearCard, logCard);
 
 fillSim();
+fillVoices();
+setTimeout(fillVoices, 500);
 renderAll();
 initMap();
 
