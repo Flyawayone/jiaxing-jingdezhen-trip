@@ -57,6 +57,13 @@
   .it-day .meta{font-size:12px;color:var(--dim);margin-bottom:6px}
   select{width:100%;background:var(--card2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px;font-size:14px;margin:6px 0}
   #map{height:42vh;border-radius:12px;border:1px solid var(--line);margin-bottom:10px}
+  #mapWrap{position:relative}
+  #btnZoom{position:absolute;top:8px;right:8px;z-index:999;background:rgba(15,23,42,.85);border:1px solid #2c3e6b;color:#e8eefc;border-radius:8px;padding:5px 11px;font-size:12px;display:none}
+  #fsOverlay{position:fixed;left:0;top:0;right:0;bottom:0;z-index:10000;background:#0f172a;display:none}
+  #fsBar{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:linear-gradient(135deg,#13214d,#0f2a5c);border-bottom:1px solid #2c3e6b;color:#e8eefc;font-size:14px;font-weight:600}
+  #fsBar button{background:#b3403d;border:none;color:#fff;border-radius:8px;padding:7px 14px;font-size:13px}
+  #fsMapHolder{position:absolute;top:46px;left:0;right:0;bottom:0}
+  #fsMapHolder #map{height:100% !important;border-radius:0;border:none;margin:0}
   .logline{font-size:12px;color:var(--dim);border-bottom:1px dashed var(--line);padding:4px 0}
   .note{font-size:11px;color:var(--dim);line-height:1.6;margin-top:8px}
   .foot{color:#5c6f9c;font-size:11px;text-align:center;padding:16px 0 30px;line-height:1.7}
@@ -116,7 +123,10 @@
       <div class="note">iPhone 想要更自然的女声：设置 → 辅助功能 → 朗读内容 → 声音 → 中文（普通话），下载<b>"婷婷（增强）"或"婷婷（Premium）"</b>后，回到本页重新打开下拉框即可选到。选完会自动试听。</div>
     </div>
 
-    <div id="map"></div>
+    <div id="mapWrap">
+      <div id="map"></div>
+      <button id="btnZoom" onclick="openFullscreen()">⛶ 放大</button>
+    </div>
 
     <div class="card">
       <h4>最近播报记录</h4>
@@ -729,8 +739,17 @@ function addLegend(){
         '<input type="checkbox" checked data-t="'+t+'" style="width:14px;height:14px">'+
         '<span style="color:'+TYPE_COLOR[t]+'">●</span> '+TYPE_TXT[t]+'</label>';
     }).join("");
-    div.innerHTML = '<div style="font-weight:700;margin-bottom:3px">图例（金色★=高分景点）</div>'+rows+
-      '<div style="font-size:11px;color:#93a5cf;margin-top:4px">点标注或列表，自动语音介绍该景点（含评分）</div>';
+    div.innerHTML = 
+      '<div id="lgHead" style="display:flex;align-items:center;justify-content:space-between;gap:16px;cursor:pointer;font-weight:700">'+
+        '<span>图例（金色★=高分）</span><span id="lgArrow" style="color:#93a5cf">▾</span></div>'+
+      '<div id="lgBody">'+rows+
+      '<div style="font-size:11px;color:#93a5cf;margin-top:4px;border-top:1px dashed #2c3e6b;padding-top:4px">点标注或列表可语音介绍；右上角⛶可全屏地图</div></div>';
+    div.querySelector("#lgHead").addEventListener("click", function(){
+      var body = div.querySelector("#lgBody");
+      var hidden = (body.style.display === "none");
+      body.style.display = hidden ? "" : "none";
+      div.querySelector("#lgArrow").textContent = hidden ? "▾" : "▸";
+    });
     div.querySelectorAll("input").forEach(function(cb){
       cb.addEventListener("change", function(){
         var l = layers[cb.getAttribute("data-t")];
@@ -741,6 +760,35 @@ function addLegend(){
     return div;
   };
   lc.addTo(map);
+}
+
+/* ================= 全屏地图 ================= */
+function initFullscreen(){
+  var zoomBtn = document.getElementById("btnZoom");
+  if (!zoomBtn || !window.L) return;
+  zoomBtn.style.display = "";
+  var ov = document.createElement("div");
+  ov.id = "fsOverlay";
+  ov.innerHTML = '<div id="fsBar"><b>🗺 全屏地图</b><button id="btnCloseFs">✕ 退出</button></div><div id="fsMapHolder"></div>';
+  document.body.appendChild(ov);
+  document.getElementById("btnCloseFs").addEventListener("click", closeFullscreen);
+  window.addEventListener("resize", function(){
+    if (map && document.getElementById("fsOverlay").style.display !== "none") map.invalidateSize();
+  });
+}
+function openFullscreen(){
+  var ov = document.getElementById("fsOverlay");
+  if (!ov || !map) return;
+  document.getElementById("fsMapHolder").appendChild(document.getElementById("map"));
+  ov.style.display = "block";
+  setTimeout(function(){ map.invalidateSize(); }, 40);
+}
+function closeFullscreen(){
+  var ov = document.getElementById("fsOverlay");
+  if (!ov || !map) return;
+  document.getElementById("mapWrap").appendChild(document.getElementById("map"));
+  ov.style.display = "none";
+  setTimeout(function(){ map.invalidateSize(); }, 40);
 }
 
 /* ================= 初始化 ================= */
@@ -779,6 +827,7 @@ fillVoices();
 setTimeout(fillVoices, 500);
 renderAll();
 initMap();
+initFullscreen();
 
 // 每 5 秒刷新一次
 setInterval(doTick, 5000);
