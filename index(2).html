@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>嘉兴→景德镇 自驾语音助手</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --bg:#0f172a; --card:#182442; --card2:#1f2f52; --line:#2c3e6b;
+    --fg:#e8eefc; --dim:#93a5cf; --acc:#4f8bff; --ok:#35d0a0; --warn:#ffb84d; --hot:#ff6b6b;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;padding:0;background:var(--bg);color:var(--fg);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:15px}
+  header{position:sticky;top:0;z-index:20;background:linear-gradient(135deg,#13214d,#0f2a5c);border-bottom:1px solid var(--line);padding:10px 14px}
+  header h1{margin:0;font-size:16px;letter-spacing:1px}
+  header .sub{font-size:11px;color:var(--dim);margin-top:2px}
+  .tabs{position:sticky;top:52px;z-index:19;display:flex;background:#0c1428;border-bottom:1px solid var(--line)}
+  .tabs button{flex:1;padding:11px 0;background:none;border:none;color:var(--dim);font-size:14px;border-bottom:3px solid transparent}
+  .tabs button.on{color:var(--acc);border-bottom-color:var(--acc);font-weight:600}
+  main{padding:12px;max-width:760px;margin:0 auto}
+  .panel{display:none}
+  .panel.on{display:block}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+  .status{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px}
+  .st{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px}
+  .st b{display:block;font-size:18px;margin-top:2px}
+  .st span{font-size:11px;color:var(--dim)}
+  .big-card{background:linear-gradient(160deg,#1a2b52,#143049);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:10px}
+  .big-card .say{font-size:17px;line-height:1.6;min-height:52px}
+  .big-card .say.empty{color:var(--dim)}
+  .big-card .tag{display:inline-block;background:#0d1b38;border:1px solid var(--line);color:var(--dim);border-radius:20px;padding:2px 10px;font-size:11px;margin-bottom:8px}
+  .btns{display:flex;gap:8px;margin:10px 0}
+  .btns button{flex:1;padding:12px 0;border:none;border-radius:10px;font-size:15px;font-weight:600;color:#fff}
+  .btn-main{background:var(--acc)}
+  .btn-sub{background:#27406e}
+  .btn-warn{background:#7a5a1e}
+  .btn-stop{background:#b3403d}
+  .pill{display:inline-block;padding:1px 8px;border-radius:12px;font-size:11px;margin-right:4px}
+  .pill.a{background:#3d2b57;color:#c79bff}
+  .pill.h{background:#0d4a35;color:#7fe8c2}
+  .pill.t{background:#3a4a1e;color:#d8e08a}
+  .pill.s{background:#5a3014;color:#ffc88a}
+  .pill.f{background:#5a4710;color:#ffe9a3}
+  .pill.day{background:#1c335c;color:#9cc0ff}
+  .pill.done{background:#0b4435;color:#8affd0}
+  .pill.soon{background:#5a4012;color:#ffe09a}
+  .pill.top{background:#5a4008;color:#ffd24d}
+  .item{display:flex;gap:10px;align-items:flex-start;padding:10px 2px;border-bottom:1px dashed var(--line)}
+  .item:last-child{border-bottom:none}
+  .item .nm{font-weight:600}
+  .item .ds{font-size:12px;color:var(--dim);margin-top:3px;line-height:1.55}
+  .item .dist{font-size:12px;color:var(--warn);white-space:nowrap}
+  .txt{font-size:12px;color:var(--dim);line-height:1.7}
+  .it-day{border-left:3px solid var(--acc);padding-left:12px;margin:14px 0}
+  .it-day h3{margin:0 0 6px;font-size:15px}
+  .it-day .meta{font-size:12px;color:var(--dim);margin-bottom:6px}
+  select{width:100%;background:var(--card2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px;font-size:14px;margin:6px 0}
+  #map{height:42vh;border-radius:12px;border:1px solid var(--line);margin-bottom:10px}
+  #mapWrap{position:relative}
+  #btnZoom{position:absolute;top:8px;right:8px;z-index:1001;background:#4f8bff;border:2px solid #fff;color:#fff;font-weight:700;border-radius:10px;padding:7px 14px;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
+  #fsOverlay{position:fixed;left:0;top:0;right:0;bottom:0;z-index:10000;background:#0f172a;display:none}
+  #fsBar{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:linear-gradient(135deg,#13214d,#0f2a5c);border-bottom:1px solid #2c3e6b;color:#e8eefc;font-size:14px;font-weight:600}
+  #fsBar button{background:#b3403d;border:none;color:#fff;border-radius:8px;padding:7px 14px;font-size:13px}
+  #fsMapHolder{position:absolute;top:46px;left:0;right:0;bottom:0}
+  #fsMapHolder #map{height:100% !important;border-radius:0;border:none;margin:0}
+  .logline{font-size:12px;color:var(--dim);border-bottom:1px dashed var(--line);padding:4px 0}
+  .note{font-size:11px;color:var(--dim);line-height:1.6;margin-top:8px}
+  .foot{color:#5c6f9c;font-size:11px;text-align:center;padding:16px 0 30px;line-height:1.7}
+  h4{margin:14px 0 6px;font-size:14px;color:#b9cdf5}
+  .routeMetric{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .metric{background:#0d1b38;border:1px solid var(--line);border-radius:8px;padding:4px 8px;font-size:11px;color:#b9cdf5}
+  .metric b{color:#fff}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🚗 嘉兴 → 景德镇 · 自驾语音助手</h1>
+  <div class="sub">长深高速 G25 · 杭瑞高速 G56 · 4~5 天 | 第3天到景德镇 · 回程再游 | 自动播报景点·美食·住宿</div>
+</header>
+
+<div class="tabs">
+  <button id="tab1" class="on">导航播报</button>
+  <button id="tab2">行程攻略</button>
+  <button id="tab3">全部点位</button>
+</div>
+
+<main>
+  <!-- ============ 导航播报 ============ -->
+  <section id="pnl1" class="panel on">
+    <div class="status">
+      <div class="st"><span>定位状态</span><b id="gpsSt">--</b></div>
+      <div class="st"><span>沿路线距景德镇</span><b id="distJdz">--</b></div>
+      <div class="st"><span>车速</span><b id="speed">--</b></div>
+      <div class="st"><span>已播报点数</span><b id="doneCnt">0</b></div>
+    </div>
+
+    <div class="big-card">
+      <span class="tag" id="sayTag">等待播报</span>
+      <div class="say empty" id="sayText">开启导航后，靠近沿途景点、美食、住宿推荐与途经城市时，会自动语音播报。</div>
+    </div>
+
+    <div class="btns">
+      <button id="btnStart" class="btn-main">▶ 开启语音播报</button>
+      <button id="btnTest" class="btn-sub">🔊 测试语音</button>
+      <button id="btnReset" class="btn-warn">↺ 重置播报</button>
+    </div>
+    <div class="btns">
+      <button id="btnStop" class="btn-stop">⏹ 停止</button>
+    </div>
+
+    <div class="card">
+      <h4>手动模拟位置（测试用，不开车也能试）</h4>
+      <select id="simSel">
+        <option value="">— 未模拟，使用真实 GPS —</option>
+      </select>
+      <div class="note">选一个地点后会立即以该处触发一次播报逻辑，用于出发前预演。真实导航会优先使用“沿路线距离”，不再单纯按直线距离触发。</div>
+    </div>
+
+    <div class="card">
+      <h4>语音设置（换好听的女声）</h4>
+      <select id="voiceSel">
+        <option value="">— 系统自动（优选女声）—</option>
+      </select>
+      <div class="note">iPhone 想要更自然的女声：设置 → 辅助功能 → 朗读内容 → 声音 → 中文（普通话），下载<b>"婷婷（增强）"或"婷婷（Premium）"</b>后，回到本页重新打开下拉框即可选到。选完会自动试听。</div>
+    </div>
+
+    <div id="mapWrap">
+      <div id="map"></div>
+      <button id="btnZoom" onclick="openFullscreen()">⛶ 放大</button>
+    </div>
+
+    <div class="card">
+      <h4>最近播报记录</h4>
+      <div id="logList"><div class="note">暂无。启动后 GPS 生效，靠近点位会自动添加。</div></div>
+    </div>
+  </section>
+
+  <!-- ============ 行程攻略 ============ -->
+  <section id="pnl2" class="panel">
+    <div class="card">
+      <div class="txt">
+        📍 本次方案：<b>第 1~2 天黄山区域 → 第 3 天抵景德镇 → 第 4 天玩瓷都 → 第 5 天回程经婺源、屯溪游玩返嘉</b>。嘉兴–杭州段纯赶路不设景点。<br>
+        🛣 高速：出发走 <b>长深高速 G25</b>（嘉兴—杭州段）→ 杭州绕城 → <b>杭瑞高速 G56</b> →（黄山/婺源方向）→ 景德镇。全程约 450 公里 / 5~6 小时。<br>
+        ⚠️ 山区段（临安—黄山、婺源）服务区间隔长、弯多雾多，注意预留；第 5 天返程较长，建议早出发、轮流驾驶。<br>
+        ⭐ <b>高分景点一键选（评分≥4.7）</b>：中国陶瓷博物馆4.9 · 陶溪川4.9 · 黄山风景区4.8 · 宏村4.7 · 篁岭4.7 · 御窑厂/陶阳里4.7 —— 时间紧张时优先保证这几个。
+      </div>
+    </div>
+
+    <div class="it-day">
+      <h3>Day 1 · 嘉兴 → 黄山（约 420 公里 / 5 小时）</h3>
+      <div class="meta">宿：黄山汤口镇（明日登山）或屯溪老街周边</div>
+      <div class="txt">纯赶路段：嘉兴上 G60 → G25 长深高速 → 杭州绕城 → G56 杭瑞高速 → 过临安、歙县抵黄山。山区段进站前加满油（<b>龙岗服务区</b>是最后补给点）。傍晚到黄山入住，养精蓄锐。<br>🍜 出发前带两只五芳斋粽子；中途临安可尝笋干老鸭煲（不进景区，服务区/县城解决即可）。</div>
+    </div>
+
+    <div class="it-day">
+      <h3>Day 2 · 黄山一日（宿黄山）</h3>
+      <div class="meta">宿：汤口 或 屯溪老街周边</div>
+      <div class="txt">
+      <b>⚪ 登山线（体能预留全天）：</b>一早 6~7 点汤口换乘中心 → 云谷索道 → 始信峰 → 黑虎松 → 光明顶 → 鳌鱼峰 → 百步云梯 → 迎客松，玉屏索道下，约 9~10 小时。<br>
+      <b>⚪ 休闲古村线：</b>上午 <b>宏村</b>（月沼、南湖），下午 <b>西递</b>（明清牌坊群）或市区 <b>屯溪老街</b> 逛吃。<br>
+      🍜 黄山必吃：臭鳜鱼、毛豆腐、刀板香（屯溪老街最集中）；正餐可去 <b>德馨食府、老街第一楼</b>（臭鳜鱼），伴手礼去 <b>胡兴堂</b> 带黄山烧饼。<br>
+      💤 <b>住宿推荐：</b>明天登山住 <b>汤口镇</b>（近南大门，镇上酒店民宿多）；不登山住 <b>屯溪老街</b> 周边，夜宵丰富（全季/亚朵可参考）。</div>
+    </div>
+
+    <div class="it-day">
+      <h3>Day 3 · 黄山 → 景德镇（约 260 公里 / 3.5 小时）</h3>
+      <div class="meta">宿：景德镇 · 建议陶溪川周边</div>
+      <div class="txt">上午屯溪老街吃碗面再出发，G56 一路向西（途经婺源方向<b>不进县城</b>，回程再玩）。下午抵景德镇：先逛 <b>中国陶瓷博物馆</b>（陶瓷史+网红"无语菩萨"，2~3h），傍晚 <b>陶溪川文创街区</b> 夜市（老瓷厂改造，越夜越好看）。<br>🍜 景德镇必吃：冷粉、碱水粑、瓷泥煨鸡、皮蛋肉饼汤；宵夜油条包麻糍。赶路不便候店的可以 <b>抚州弄口油条摊、眼镜冷粉</b> 挑一家；<b>回家吃饭(陶溪川店)</b> 适合正餐。<br>💤 <b>住宿推荐：</b>首选 <b>陶溪川周边</b>（步行逛夜市），次选御窑厂/珠山区。连锁与特色民宿齐全（可参考陶溪川店系酒店）。</div>
+    </div>
+
+    <div class="it-day">
+      <h3>Day 4 · 景德镇一日（宿景德镇或瑶里）</h3>
+      <div class="meta">宿：景德镇市区 或 瑶里山间民宿</div>
+      <div class="txt">上午 <b>古窑民俗博览区</b>（5A：宋至清历代古窑+手工制瓷全程+瓷乐表演，10:00/14:00）；下午 <b>御窑厂遗址/陶阳里</b>（皇家御窑+现代御窑博物馆，夜景也美，可在旁 <b>小梁园</b> 吃地道瓷菜）或 <b>三宝国际陶艺村</b> 亲手做一件瓷器，三宝一带可顺路 <b>啄佬食堂</b> 吃家常菜。<br>🕐 时间多：下午驱车约 40 分钟去 <b>瑶里古镇</b>（陶瓷发祥地，瑶河老街+绕南古窑址），宿山间民宿或回市区。</div>
+    </div>
+
+    <div class="it-day">
+      <h3>Day 5 · 回程：景德镇 → 婺源 → 嘉兴（约 480 公里 / 6 小时，中间游玩）</h3>
+      <div class="meta">宿：婺源县城 或（若分两天）篁岭景区内</div>
+      <div class="txt">上午返程先到 <b>婺源</b>：主打 <b>篁岭</b>（晒秋人家+天街+梯田，索道上下，半天），时间紧则改选 <b>李坑</b> 或 <b>江湾</b> 一个古村 + <b>月亮湾</b> 日落。午后顺路 <b>屯溪老街</b> 休整买伴手礼，傍晚高速返嘉，约 21~22 点到家。<br>🍜 婺源当地菜：汽糕、糊豆腐、粉蒸肉、清明粿（旺季提前订位）；县城吃 <b>婺源第一楼（朱子大道店）、紫阳小吃</b>。住宿参考 <b>婺源一束RARA（高铁站旁）、茶圣精舍（婺女洲）</b>。<br>📅 若只休 4 天：Day4 下午直接返程看月亮湾日落、宿婺源，Day5 篁岭半日后赶回嘉兴。</div>
+    </div>
+
+    <div class="card">
+      <h4>📝 几条提醒</h4>
+      <div class="txt">· 黄山、皖南山区弯多雾多，3~4 月多雨，备防滑鞋、挡风外套；<b>近龙岗服务区前加满油</b>。<br>
+      · 篁岭旺季（晒秋/黄金周）停车场易满，建议住景区附近民宿。<br>
+      · 播报点为<b>估算坐标</b>，按公里级半径触发；服务区等以实际路牌为准。<br>
+      · 附近酒店/美食为<b>带定位的具体店名</b>（坐标为估算锚点，半径2~3公里触发），营业与评分以导航实时结果为准。</div>
+    </div>
+  </section>
+
+  <!-- ============ 全部点位 ============ -->
+  <section id="pnl3" class="panel">
+    <div class="card" id="listAll">
+      <div class="note">按行程先后排序（靠近自动播报，绿色=已播报）。景点带黄色★评分，⭐高分=评分≥4.7。</div>
+    </div>
+  </section>
+</main>
+
+<div class="foot">该文件可离线使用（语音播报不依赖网络）；在线时自动加载地图。<br>文件仅在你本机运行，不上传任何数据。</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+"use strict";
+
+/* ================= 点位数据库（坐标均为估算，可作为触发锚点） ================= */
+var POI = [
+  // ---------- 途经城市（D1 赶路段，不设景点）----------
+  {id:"huzhou", name:"湖州（途经）", type:"t", town:"湖州", lat:30.893, lng:120.087, r:6, day:1,
+   say:"湖州：途经城市，可加油补给。今天直奔黄山方向，不安排游玩，服务区解决即可。", desc:"D1 赶路途经。", tip:""},
+  {id:"hangzhou", name:"杭州（绕城途经）", type:"t", town:"杭州", lat:30.267, lng:120.153, r:7, day:1,
+   say:"杭州绕城：通过杭州时注意市区拥堵，沿长深高速转杭瑞高速直行，不进市区。", desc:"D1 赶路途经。", tip:""},
+  {id:"linan", name:"临安（山区高速起点）", type:"t", town:"杭州·临安", lat:30.233, lng:119.717, r:6, day:1,
+   say:"临安：进入山区高速前最后的大县城，再次确认油量与休息，之后到黄山服务区间隔较长。", desc:"D1 赶路途经。", tip:""},
+  {id:"wuyuancity", name:"婺源县城", type:"t", town:"上饶·婺源", lat:29.249, lng:117.861, r:5, day:3,
+   say:"婺源县城：此行回程的游玩重点，徽州古村与晒秋之乡，去程不进城，返程那天下高速再玩。", desc:"D5 回程主玩区域。", tip:"县城到各古村20~40分钟车程。"},
+
+  // ---------- D2 黄山区域 ----------
+  {id:"huangshan", name:"黄山风景区（汤口）", type:"a", town:"黄山·汤口", lat:30.121, lng:118.176, r:8, day:2, rate:4.8,
+   say:"黄山风景区，评分4.8：中国第一奇山，奇松怪石云海。登山需一整天，清早换乘上山。", desc:"D2 登山主线，需全天。", tip:"山顶多雾，看预报备雨具；缆车+合理路线。",
+   intro:"黄山被誉为中国第一奇山，是联合国世界自然与文化双遗产。以奇松、怪石、云海、温泉、冬雪‘五绝’名冠天下，登顶看云海日出是一生不可错过的体验。登山需一整天，务必清早7点前上山，缆车加合理线路能省一半体力。"},
+  {id:"hongcun", name:"宏村", type:"a", town:"黄山·黟县", lat:29.996, lng:117.982, r:5, day:2, rate:4.7,
+   say:"宏村，评分4.7：画里乡村，南湖月沼，徽派建筑的教科书。", desc:"D2 休闲线首选。", tip:"门票约百元级，可与西递连游。",
+   intro:"有着‘画里乡村’美誉的宏村，是皖南徽派民居的代表作。牛形村落与人工水系设计精妙，南湖桥、月沼倒影是最经典的摄影机位；《卧虎藏龙》《爸爸去哪儿》曾在此取景，烟雨时节如一幅天然水墨画卷。"},
+  {id:"xidi", name:"西递", type:"a", town:"黄山·黟县", lat:29.902, lng:117.957, r:5, day:2, rate:4.6,
+   say:"西递，评分4.6：宋代古村，明清牌坊群，比宏村更安静原味。", desc:"D2 休闲线副选。", tip:"与宏村半小时车程，可连游。",
+   intro:"入选世界文化遗产‘皖南古村落’的西递建于北宋，是明代胡氏宗族故里。99条高墙深巷如迷宫，保留数百幢明清古民居与古牌坊；俗语‘看外表去宏村、看内涵来西递’，这里更安静，商业气息更淡。"},
+  {id:"tunxi", name:"屯溪老街（黄山市）", type:"a", town:"黄山市区", lat:29.715, lng:118.301, r:4, day:2, rate:4.5,
+   say:"屯溪老街，评分4.5：流动的清明上河图，免费老街，徽菜与夜宵集中地。", desc:"美食+住宿聚集区。", tip:"免费老街，夜宵丰富。",
+   intro:"屯溪老街被称为‘流动的清明上河图’，自南宋起延续至今的商业街市。约1公里长的老街白墙黛瓦、马头墙林立，徽菜、烧饼、文房四宝铺子云集，免费开放，夜景和小吃体验最好。"},
+  {id:"shexian", name:"徽州古城（歙县）", type:"a", town:"黄山·歙县", lat:29.872, lng:118.414, r:5, day:2, rate:4.5,
+   say:"徽州古城，评分4.5：徽文化发源地，八脚牌坊与渔梁坝。", desc:"顺路一站。", tip:"徽园联票含多个小点。",
+   intro:"徽州古城是中国保存最完整的古城之一，也是徽文化的发源地。城内许国石坊是全国罕见的八脚牌坊，徽园浓缩徽派园林精华，城外渔梁坝是明代水利杰作；从G56下高速即到，适合顺路一游。"},
+
+  // ---------- D3/D4 景德镇 ----------
+  {id:"jdz", name:"景德镇市区", type:"t", town:"景德镇", lat:29.270, lng:117.178, r:6, day:3,
+   say:"景德镇：世界瓷都。重点是陶瓷博物馆、古窑、陶溪川三步曲，建议住陶溪川周边，晚上逛文创夜市。", desc:"终点城市 / D3 抵达。", tip:"推荐住陶溪川周边，步行可达夜市。"},
+  {id:"txc", name:"陶溪川文创街区", type:"a", town:"景德镇·珠山", lat:29.276, lng:117.195, r:3, day:3, rate:4.9,
+   say:"陶溪川文创街区，评分4.9：景德镇城市名片，全城最好看的夜景夜市。", desc:"夜游首选，住宿推荐周边。", tip:"夜市有原创陶瓷摊位。",
+   intro:"陶溪川是景德镇的城市名片，由老宇宙瓷厂房区改造的文创街区。美术馆、设计酒店、咖啡馆与原创陶瓷市集错落其间，入夜后灯影流光、越夜越美，形成知名的‘陶溪川现象’，是触摸当代景德镇的第一站。"},
+  {id:"bwg", name:"中国陶瓷博物馆", type:"a", town:"景德镇", lat:29.259, lng:117.150, r:4, day:3, rate:4.9,
+   say:"中国陶瓷博物馆，评分4.9：馆藏5万件，瓷都必去榜首，还有网红思考罗汉。", desc:"瓷都知识层，S级。", tip:"一般免费预约，下午4点前入场。",
+   intro:"中国陶瓷博物馆是国内首家大型陶瓷专题博物馆，收藏自新石器时代至当代的陶瓷约5万件，完整呈现千年窑火史。镇馆之宝为各代官窑精品，馆内‘无语菩萨’（沉思罗汉）已成网红打卡点，建议留足2-3小时。"},
+  {id:"guyao", name:"古窑民俗博览区", type:"a", town:"景德镇·西郊", lat:29.268, lng:117.130, r:4, day:4, rate:4.6,
+   say:"古窑民俗博览区，评分4.6：历代古窑加手工制瓷全程，瓷乐表演好玩。", desc:"瓷都生产层，5A。", tip:"瓷乐表演时间以现场为准。",
+   intro:"古窑民俗博览区是5A级景区，复原了宋、元、明、清历代古窑群与千年制瓷工艺。可现场观看淘泥、拉坯、彩绘、装窑到烧成的完整流程，还能聆听用瓷碗编钟演奏的瓷乐表演（约10:00与14:00两场）。"},
+  {id:"yuyue", name:"御窑厂遗址 / 陶阳里", type:"a", town:"景德镇·老城", lat:29.272, lng:117.188, r:3, day:4, rate:4.7,
+   say:"御窑厂陶阳里，评分4.7：皇家御窑遗址，御窑博物馆夜景极美。", desc:"老城区文化集群。", tip:"傍晚亮灯后更适合拍照。",
+   intro:"御窑厂遗址是明清两朝皇家御窑所在地，也是世界唯一的皇家瓷厂遗址。现代御窑博物馆造型如拱形窑体，展出由御窑碎片修复的珍贵器物，傍晚亮灯后砖红建筑倒映水面，拍照效果极佳。"},
+  {id:"sanbao", name:"三宝国际陶艺村", type:"a", town:"景德镇·城南", lat:29.243, lng:117.213, r:4, day:4, rate:4.5,
+   say:"三宝村，评分4.5：艺术家聚落山谷，可亲手做一件瓷器。", desc:"可手作体验。", tip:"手作约几十元起。",
+   intro:"三宝国际陶艺村是景德镇城南的山谷艺术聚落，陶艺工作室、美术馆与咖啡馆散布竹林之间。可以亲手拉坯，做一件属于自己的瓷器（体验价几十元起），适合慢节奏游览半日。"},
+  {id:"yaoli", name:"瑶里古镇", type:"a", town:"浮梁·瑶里", lat:29.530, lng:117.652, r:6, day:4, rate:4.6,
+   say:"瑶里古镇，评分4.6：陶瓷发祥地，原生态徽饶古道，适合住一晚。", desc:"加选，浮梁方向。", tip:"景区分散，选古镇+一处窑址即可。",
+   intro:"瑶里古镇是景德镇陶瓷的发祥地，也是徽饶古道的枢纽。瑶河穿镇而过，明清老街保存原生态风貌，绕南古窑址可见古代瓷窑堆积层；这里比市区安静许多，值得留一晚枕水听山。"},
+
+  // ---------- D5 回程 婺源 ----------
+  {id:"huangling", name:"篁岭景区", type:"a", town:"上饶·婺源", lat:29.138, lng:117.969, r:6, day:5, rate:4.7,
+   say:"篁岭，评分4.7：晒秋人家加悬崖古村，索道上下，回程主玩首选。", desc:"回程婺源头牌。", tip:"旺季停车场易满，住附近民宿或早到。",
+   intro:"篁岭是‘挂在悬崖上的村庄’，徽派民居错落山腰，晒架上常年展示辣椒、黄菊组成的‘晒秋’景观。天街店铺鳞次栉比，垒心桥横跨山谷，下方是层层梯田（春季油菜花、秋季稻田），索道上下很省力。"},
+  {id:"likeng", name:"李坑村", type:"a", town:"上饶·婺源", lat:29.201, lng:117.916, r:4, day:5, rate:4.4,
+   say:"李坑，评分4.4：小桥流水人家，可坐竹筏，回程省时之选。", desc:"回程备选。", tip:"竹筏约20元一人。",
+   intro:"李坑有‘小桥流水人家’的美誉，是南宋始建的徽派水乡村落。双桥流水、青石板巷连接两岸民居，可乘竹筏穿村而过；回程时间紧张时，它是感受婺源古村风情最省时的一站。"},
+  {id:"jiangwan", name:"江湾古镇", type:"a", town:"上饶·婺源", lat:29.158, lng:117.944, r:4, day:5, rate:4.5,
+   say:"江湾古镇，评分4.5：婺源5A古镇，萧江宗祠气派。", desc:"回程备选。", tip:"江湾雪梨是特产。",
+   intro:"江湾是婺源的高等级古镇，萧江大宗祠气势恢宏、斗拱雕刻精美，村中格局保存完好，还出产江湾雪梨等特产，适合作为回程古村备选。"},
+  {id:"yueliang", name:"月亮湾（秋口）", type:"a", town:"上饶·婺源", lat:29.278, lng:117.875, r:3, day:5, rate:4.6,
+   say:"月亮湾，评分4.6：S形河湾日落经典机位，回程顺路打卡。", desc:"县城近郊观景点。", tip:"傍晚光线最佳。",
+   intro:"月亮湾位于婺源县城近郊，S形河湾绕村而过、水面宽缓。清晨常见薄雾笼罩，日落金光洒满河面时最为经典，是婺源最出名的免费摄影机位，顺路停车即到。"},
+
+  // ---------- 住宿推荐（按目的地区域触发）----------
+  {id:"h_huangshan", name:"D1/D2 住宿 · 黄山", type:"h", town:"黄山", lat:30.100, lng:118.180, r:13, day:2,
+   say:"今晚住宿建议：明日登黄山住汤口镇（近南大门，镇上酒店民宿多）；不登山住屯溪老街周边，夜宵丰富，全季亚朵可参考。", desc:"", tip:""},
+  {id:"h_tk_qj", name:"全季酒店·黄山南大门汤口店", type:"h", town:"黄山·汤口", lat:30.096, lng:118.168, r:3, day:2,
+   say:"全季酒店汤口店：华住连锁，汤川路近换乘中心，评分4.8，登黄山前一晚的稳妥之选。", desc:""},
+  {id:"h_tk_xrb", name:"希尔顿欢朋·黄山南大门店", type:"h", town:"黄山·汤口", lat:30.094, lng:118.169, r:3, day:2,
+   say:"希尔顿欢朋黄山南大门店：汤川路45号，2019年开业山景房，评分4.9，适合带家人住得好一点。", desc:""},
+  {id:"h_tk_wyn", name:"维也纳国际·黄山南大门汤口店", type:"h", town:"黄山·汤口", lat:30.095, lng:118.168, r:3, day:2,
+   say:"维也纳国际汤口店：汤川路119-1号，连锁老牌，评分4.7，性价比不错，离换乘中心很近。", desc:""},
+  {id:"h_tk_lhs", name:"莲花山庄温泉度假酒店", type:"h", town:"黄山·汤口", lat:30.092, lng:118.170, r:3, day:2,
+   say:"莲花山庄温泉酒店：南大门脚下，露天温泉，爬完黄山回来泡汤解乏，四人家庭价比拼2间房合适。", desc:""},
+  {id:"h_jdz", name:"D3/D4 住宿 · 景德镇", type:"h", town:"景德镇", lat:29.270, lng:117.185, r:9, day:3,
+   say:"景德镇住宿：首选陶溪川文创区周边，晚上步行逛夜市；次选御窑厂/珠山区。连锁与特色民宿齐全，陶溪川店系酒店可参考。", desc:"", tip:""},
+  {id:"h_jdz_hyatt", name:"凯悦嘉轩·陶溪川店", type:"h", town:"景德镇·陶溪川", lat:29.2755, lng:117.1930, r:3, day:3,
+   say:"凯悦嘉轩酒店·陶溪川店：国际连锁，就在陶溪川文创区内，逛夜市走到门口，品质稳定。", desc:""},
+  {id:"h_jdz_bg", name:"铂格酒店·陶溪川店", type:"h", town:"景德镇·陶溪川", lat:29.2760, lng:117.1970, r:3, day:3,
+   say:"铂格酒店：陶玉南路山水瑞园，步行五六分钟到陶溪川，含早餐，停车方便。", desc:""},
+  {id:"h_jdz_lc", name:"丽橙酒店·悦(陶溪川文创街区店)", type:"h", town:"景德镇·陶溪川", lat:29.2750, lng:117.1940, r:3, day:3,
+   say:"丽橙酒店悦·陶溪川店：文创街区周边，夜市步行可达，晚上逛完直接回房。", desc:""},
+  {id:"h_wuyuan", name:"D5 住宿 · 婺源", type:"h", town:"婺源", lat:29.200, lng:117.900, r:13, day:5,
+   say:"回程住宿：婺源县城最方便，吃饭选择多；想拍晨昏就住篁岭景区内民宿，价格较高要早订。", desc:"", tip:""},
+  {id:"h_wy_rara", name:"婺源一束·RARA酒店(高铁站店)", type:"h", town:"婺源", lat:29.286, lng:117.840, r:4, day:5,
+   say:"婺源一束RARA酒店：高铁站旁，自驾下高速顺路入住，离县城和景区都近，带娃友好。", desc:""},
+  {id:"h_wy_chs", name:"茶圣精舍酒店(婺女洲)", type:"h", town:"婺源", lat:29.263, lng:117.872, r:4, day:5,
+   say:"茶圣精舍酒店：婺女洲度假区内，住里面可夜游看灯光与烟花秀。", desc:""},
+
+  // ---------- 美食推荐 ----------
+  {id:"f_jiaxing", name:"出发美食 · 嘉兴", type:"f", town:"嘉兴", lat:30.766, lng:120.750, r:5, day:0,
+   say:"出发前美食：嘉兴五芳斋鲜肉粽、南湖菱，高速服务区也可顺路买两只路上吃。", desc:"", tip:""},
+  {id:"f_huzhou", name:"途经美食 · 湖州", type:"f", town:"湖州", lat:30.893, lng:120.087, r:6, day:1,
+   say:"湖州当地味：干挑面、太湖三白、湖州大馄饨，饭点下高速一尝。", desc:"", tip:""},
+  {id:"f_hangzhou", name:"途经美食 · 杭州", type:"f", town:"杭州", lat:30.267, lng:120.153, r:6, day:1,
+   say:"杭州美食参考：片儿川、东坡肉、龙井虾仁；赶路不进城的在服务区解决即可。", desc:"", tip:""},
+  {id:"f_linan", name:"途经美食 · 临安", type:"f", town:"杭州·临安", lat:30.233, lng:119.717, r:6, day:1,
+   say:"临安吃笋：笋干老鸭煲、天目山野菜，山里食材新鲜，午饭可选。", desc:"", tip:""},
+  {id:"f_huangshan", name:"美食 · 黄山徽菜", type:"f", town:"黄山", lat:29.715, lng:118.301, r:5, day:2,
+   say:"黄山必吃：臭鳜鱼、毛豆腐、刀板香，屯溪老街最集中；伴手礼带徽墨酥。", desc:"", tip:""},
+  {id:"f_tx_dx", name:"德馨食府·徽菜名店(屯溪老街店)", type:"f", town:"黄山市区·老街", lat:29.7151, lng:118.3009, r:2, day:2,
+   say:"德馨食府老街店：屯溪老街老字号徽菜馆，砂锅臭鳜鱼加香煎毛豆腐，人均60到80，本地人也常去。", desc:"老街内，导航到延安路老街入口停车场最顺。"},
+  {id:"f_tx_dyl", name:"老街第一楼(屯溪老街)", type:"f", town:"黄山市区·老街", lat:29.7149, lng:118.3012, r:2, day:2,
+   say:"老街第一楼：老街人气徽菜馆，臭鳜鱼毛豆腐刀板香都有，饭点要排队，建议错峰。", desc:""},
+  {id:"f_tx_hx", name:"胡兴堂糕饼店(屯溪老街)", type:"f", town:"黄山市区·老街", lat:29.7153, lng:118.3010, r:2, day:2,
+   say:"胡兴堂：百年糕饼老铺，历史可溯1823年，黄山烧饼1块5一个，配徽墨酥做伴手礼很合适。", desc:"营业约9点到20点。"},
+  {id:"f_tx_xar", name:"新安人家徽菜馆(滨江东路)", type:"f", town:"黄山市区·新安江畔", lat:29.717, lng:118.323, r:3, day:2,
+   say:"新安人家：离老街约2公里的徽菜馆，新安江畔，26年本地店，免费停车带娃方便，臭鳜鱼入味。", desc:""},
+  {id:"f_jdz", name:"美食 · 景德镇瓷都味", type:"f", town:"景德镇", lat:29.272, lng:117.188, r:6, day:3,
+   say:"景德镇必吃：冷粉、碱水粑、瓷泥煨鸡、皮蛋肉饼瓦罐汤，宵夜油条包麻糍，陶溪川周边小吃摊多。", desc:"", tip:""},
+  {id:"f_jdz_fz", name:"抚州弄口油条摊(珠山区抚州弄)", type:"f", town:"景德镇·珠山", lat:29.2715, lng:117.1875, r:2, day:3,
+   say:"抚州弄口油条摊：现炸油条包麻糍，滚芝麻白糖，5块一个，景德镇早餐招牌，早上最香。", desc:""},
+  {id:"f_jdz_yj", name:"眼镜冷粉(戴家弄)", type:"f", town:"景德镇·珠山", lat:29.2700, lng:117.1860, r:2, day:4,
+   say:"眼镜冷粉：戴家弄三十年老店，本地冷粉代表作，酸辣爽口，只做早午市，去晚就没了。", desc:""},
+  {id:"f_jdz_hj", name:"回家吃饭·本地菜(陶溪川店)", type:"f", town:"景德镇·陶溪川", lat:29.2760, lng:117.1952, r:2, day:3,
+   say:"回家吃饭陶溪川店：本地人常去的家常馆子，辣椒炒肉加土猪肉焖面，人均60左右。", desc:""},
+  {id:"f_jdz_fz2", name:"冯氏牛骨粉(新厂路)", type:"f", town:"景德镇·珠山", lat:29.2780, lng:117.1980, r:2, day:3,
+   say:"冯氏牛骨粉：新厂路夜宵档，牛骨粉配冷粉皮蛋汤，陶溪川逛完过来吃夜宵。", desc:""},
+  {id:"f_jdz_zhl", name:"啄佬食堂(雕塑瓷厂后门)", type:"f", town:"景德镇·城南", lat:29.2640, lng:117.2020, r:2, day:4,
+   say:"啄佬食堂：雕塑瓷厂后门，本地家常菜，粉蒸肉藜蒿炒腊肉，饭点人多，建议提前电话约。", desc:""},
+  {id:"f_jdz_xly", name:"小梁园·地道景德菜(御窑旁)", type:"f", town:"景德镇·老城", lat:29.2710, lng:117.1800, r:2, day:4,
+   say:"小梁园：昌江大道9号、御窑博物馆旁，地道景德菜，脆皮玻璃虾球加碱水粑，人均80到100。", desc:""},
+  {id:"f_wuyuan", name:"美食 · 婺源农家菜", type:"f", town:"上饶·婺源", lat:29.249, lng:117.861, r:6, day:5,
+   say:"婺源当地菜：汽糕、糊豆腐、粉蒸肉、清明粿，旺季建议提前订位。", desc:"", tip:""},
+  {id:"f_wy_dyl", name:"婺源第一楼(朱子大道店)", type:"f", town:"上饶·婺源", lat:29.248, lng:117.858, r:2, day:5,
+   say:"婺源第一楼：朱子大道、华星广场南50米，本地网红店，粉蒸肉糊豆腐荷包红鲤鱼汽糕，人均约80。", desc:"旺季高峰要排队，可错峰。"},
+  {id:"f_wy_rj", name:"婺源人家农家菜(文公北路)", type:"f", town:"上饶·婺源", lat:29.244, lng:117.862, r:2, day:5,
+   say:"婺源人家农家菜：文公北路251-45号，人均55，糊豆腐加粉蒸鱼，地道的农家口味。", desc:""},
+  {id:"f_wy_zy", name:"紫阳小吃(县政府旁)", type:"f", town:"上饶·婺源", lat:29.246, lng:117.854, r:2, day:5,
+   say:"紫阳小吃：县政府旁老店，糯米子糕被当地人称为婺源第一，尝尝地道小吃。", desc:""},
+
+  // ---------- 服务区（估算）----------
+  {id:"s_longan", name:"龙岗服务区（G56 浙江段）", type:"s", town:"临安·龙岗", lat:30.238, lng:119.262, r:2, day:1,
+   say:"前方龙岗服务区：进入山区高速前的补给点，建议加油和休息，之后到黄山服务区间隔较长。", desc:"位置为估算，以实际路牌为准。", tip:"山区路段提前加油。"}
+];
+
+var WAYPOINTS = [
+  [30.766,120.750],[30.893,120.087],[30.267,120.153],[30.234,119.717],
+  [30.220,119.370],[30.213,119.163],[30.238,119.262],[29.872,118.414],[29.715,118.301],
+  [29.783,118.190],[29.249,117.861],[29.270,117.178]
+];
+
+var TYPE_TXT = {a:"景点",h:"住宿",t:"途经",s:"服务区",f:"美食"};
+var TYPE_PILL = {a:"a",h:"h",t:"t",s:"s",f:"f"};
+var TYPE_LABEL = {a:"景",h:"住",t:"途",s:"服",f:"吃"};
+var TYPE_COLOR = {a:"#ff6b6b", h:"#7fe8c2", t:"#9cc0ff", s:"#ffc88a", f:"#ffe9a3"};
+
+/* ================= 状态 ================= */
+var running = false;
+var announced = {};
+try { announced = JSON.parse(localStorage.getItem("jx_jdz_announced")||"{}"); } catch(e){ announced={}; }
+var logs = [];
+var pos = null;        // 当前位置 {lat,lng,speed}
+var simPos = null;     // 模拟位置
+var map = null, mkrList = {};
+var distToJdz = "";
+
+/* ================= 路线距离模型 =================
+ * 目标：自动播报优先采用“车辆沿预设路线前进了多少公里”，而不是当前位置与 POI 的直线距离。
+ * WAYPOINTS 是人工设置的路线锚点，因此这里采用“分段投影 + 累积里程”的近似模型。
+ * 对不在主路线附近的点位，只有在路线走廊内才允许自动播报。
+ */
+var ROUTE = { points: [], cumulativeKm: [], totalKm: 0 };
+var ROUTE_CORRIDOR_DEFAULT = 8; // POI 距主路线超过该值时，不自动播报（手动点选仍可播报）
+var ANNOUNCE_AHEAD_KM = [5, 2, 0.5]; // 未来三个阶段：预告/临近/到达
+
+function toXY(lat, lng, refLat){
+  var kx = 111.32 * Math.cos(refLat * Math.PI / 180);
+  var ky = 111.32;
+  return {x: lng * kx, y: lat * ky};
+}
+
+function projectToSegment(px, py, ax, ay, bx, by){
+  var dx = bx-ax, dy = by-ay;
+  var len2 = dx*dx + dy*dy;
+  var t = len2 ? ((px-ax)*dx + (py-ay)*dy)/len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  var qx = ax + t*dx, qy = ay + t*dy;
+  var d = Math.hypot(px-qx, py-qy);
+  return {t:t, x:qx, y:qy, distKm:d};
+}
+
+function buildRouteModel(){
+  var pts = WAYPOINTS.map(function(p){ return {lat:p[0], lng:p[1]}; });
+  ROUTE.points = pts;
+  ROUTE.cumulativeKm = [0];
+  var total = 0;
+  for (var i=1;i<pts.length;i++) {
+    total += haversine(pts[i-1], pts[i]);
+    ROUTE.cumulativeKm.push(total);
+  }
+  ROUTE.totalKm = total;
+}
+
+function projectToRoute(lat,lng){
+  if (!ROUTE.points.length) buildRouteModel();
+  var best = null;
+  var refLat = lat;
+  var q = toXY(lat,lng,refLat);
+  for (var i=0;i<ROUTE.points.length-1;i++) {
+    var a = ROUTE.points[i], b = ROUTE.points[i+1];
+    var aa = toXY(a.lat,a.lng,refLat), bb = toXY(b.lat,b.lng,refLat);
+    var pr = projectToSegment(q.x,q.y,aa.x,aa.y,bb.x,bb.y);
+    if (!best || pr.distKm < best.crossTrackKm) {
+      var segKm = haversine(a,b);
+      best = {
+        segment:i,
+        t:pr.t,
+        crossTrackKm:pr.distKm,
+        routeKm:ROUTE.cumulativeKm[i] + segKm*pr.t
+      };
+    }
+  }
+  return best;
+}
+
+function ensureRouteMeta(){
+  if (!ROUTE.points.length) buildRouteModel();
+  POI.forEach(function(p){
+    if (p._routeKm == null || p._crossTrackKm == null){
+      var r = projectToRoute(p.lat,p.lng);
+      p._routeKm = r ? r.routeKm : Infinity;
+      p._crossTrackKm = r ? r.crossTrackKm : Infinity;
+      if (p.corridorKm == null) p.corridorKm = ROUTE_CORRIDOR_DEFAULT;
+    }
+  });
+}
+
+function routePosition(){
+  var c=currentPos();
+  if (!c) return null;
+  ensureRouteMeta();
+  var r=projectToRoute(c.lat,c.lng);
+  if (!r) return null;
+  return {routeKm:r.routeKm,crossTrackKm:r.crossTrackKm};
+}
+
+function routeAheadKm(p){
+  var rp=routePosition();
+  if (!rp || p._routeKm==null) return Infinity;
+  return p._routeKm-rp.routeKm;
+}
+
+function saveAnnounced(){ try{ localStorage.setItem("jx_jdz_announced", JSON.stringify(announced)); }catch(e){} }
+
+function haversine(a,b){
+  var R=6371, dLat=(b.lat-a.lat)*Math.PI/180, dLng=(b.lng-a.lng)*Math.PI/180;
+  var s=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+
+/* ================= 语音 ================= */
+var forcedVoice = "";
+try { forcedVoice = localStorage.getItem("jx_jdz_voice") || ""; } catch(e){ forcedVoice=""; }
+function pickVoice(){
+  var vs = speechSynthesis.getVoices();
+  if (!vs.length) return null;
+  if (forcedVoice){
+    var f = vs.find(function(v){ return v.name===forcedVoice; });
+    if (f) return f;
+  }
+  var zh = vs.filter(function(v){ return /^zh/i.test(v.lang||""); });
+  var pool = zh.length ? zh : vs;
+  function score(v){
+    var s = 0;
+    if (/enhanced|premium|siri voice|improved|neural/i.test(v.name)) s += 30;
+    if (/tingting|婷婷|meijia|yaoyao|lili|xiaoxiao|shanshan/i.test(v.name)) s += 20;
+    if (/zh-cn/i.test(v.lang||"")) s += 5;
+    return s;
+  }
+  pool.sort(function(a,b){ return score(b)-score(a); });
+  return pool[0];
+}
+if ('speechSynthesis' in window){
+  speechSynthesis.onvoiceschanged = function(){ pickVoice(); fillVoices(); };
+}
+var voiceSelBound = false;
+function fillVoices(){
+  if (!('speechSynthesis' in window)) return;
+  var sel = document.getElementById("voiceSel");
+  if (!sel) return;
+  var vs = speechSynthesis.getVoices();
+  if (!vs.length) return;
+  sel.innerHTML = '<option value="">— 系统自动（优选女声）—</option>' + vs.map(function(v){
+    var name = String(v.name).replace(/"/g, "&quot;");
+    return '<option value="'+name+'">'+name+' ('+(v.lang||"")+')</option>';
+  }).join("");
+  sel.value = forcedVoice;
+  if (!voiceSelBound){
+    voiceSelBound = true;
+    sel.addEventListener("change", function(){
+      forcedVoice = sel.value;
+      try { localStorage.setItem("jx_jdz_voice", forcedVoice); } catch(e){}
+      if (forcedVoice){
+        speak("你选择了" + forcedVoice + "，测试成功。后面的播报都会用这个声音。");
+        showSay({name:"语音设置", type:"t", day:0}, "已切换到：" + forcedVoice + "。");
+      } else {
+        speak("已恢复系统自动选择，测试成功。");
+        showSay({name:"语音设置", type:"t", day:0}, "已恢复系统自动选择（优选好听的女声）。");
+      }
+    });
+  }
+}
+
+function speak(text){
+  if (!('speechSynthesis' in window)) return false;
+  var myTok = ++sayToken;
+  saying = false;
+  speechSynthesis.cancel();
+  var u = speakUtter(text);
+  saying = true;
+  speechSynthesis.speak(u);
+  u.onend = function(){ if (myTok===sayToken){ saying = false; setTimeout(pumpSay, 700); } };
+  setTimeout(function(){
+    if (myTok===sayToken && saying){ try{ speechSynthesis.cancel(); }catch(e){} saying = false; setTimeout(pumpSay, 700); }
+  }, 9000 + text.length*180);
+  return true;
+}
+
+var sayQueue = [];
+var saying = false;
+var sayToken = 0;
+
+function speakUtter(text){
+  var u = new SpeechSynthesisUtterance(text);
+  var v = pickVoice(); if (v) u.voice = v;
+  u.lang = v ? v.lang : "zh-CN";
+  u.rate = 1.0; u.pitch = 1.0; u.volume = 1;
+  return u;
+}
+
+function flushSay(){
+  sayToken++;
+  sayQueue = [];
+  saying = false;
+  try{ speechSynthesis.cancel(); }catch(e){}
+}
+
+function enqueue(p, say){
+  sayQueue.push({p:p, say:say});
+  pumpSay();
+}
+
+function pumpSay(){
+  if (!running || saying || !sayQueue.length) return;
+  var it = sayQueue.shift();
+  var myTok = ++sayToken;
+  saying = true;
+  showSay(it.p, it.say);
+  var u = speakUtter(it.say);
+  speechSynthesis.speak(u);
+  u.onend = function(){ if (myTok===sayToken){ saying = false; setTimeout(pumpSay, 700); } };
+  setTimeout(function(){
+    if (myTok===sayToken && saying){ try{ speechSynthesis.cancel(); }catch(e){} saying = false; setTimeout(pumpSay, 700); }
+  }, 9000 + it.say.length*180);
+}
+
+function spotText(p){
+  if (p.type==="a"){
+    var s = p.name;
+    if (p.rate!=null) s += "，评分"+p.rate+"分";
+    s += "。" + (p.intro || p.say);
+    if (p.tip) s += "提示：" + p.tip;
+    return s;
+  }
+  return (p.say || (p.name + "到了"));
+}
+function spotSpeak(p){
+  if (!p || !('speechSynthesis' in window)) return;
+  var text = spotText(p);
+  flushSay();
+  showSay(p, text);
+  speak(text);
+}
+
+/* ================= 点位 ================= */
+function currentPos(){
+  if (simPos) return simPos;
+  if (pos) return {lat:pos.lat, lng:pos.lng, speed:(pos.speed||0)};
+  return null;
+}
+
+function getDist(p){
+  var c = currentPos();
+  if (!c) return Infinity;
+  return haversine({lat:c.lat,lng:c.lng},{lat:p.lat,lng:p.lng});
+}
+
+function trigger(p){
+  var directKm = getDist(p);
+  var aheadKm = routeAheadKm(p);
+  var corridor = (p.corridorKm==null ? ROUTE_CORRIDOR_DEFAULT : p.corridorKm);
+  var routeEligible = isFinite(aheadKm) && p._crossTrackKm <= corridor && aheadKm >= -0.5;
+  var key = p.id;
+  var state = announced[key] ? "done" : (routeEligible && aheadKm <= 5 ? "soon" : "");
+  return {p:p, d:directKm, aheadKm:aheadKm, crossTrackKm:p._crossTrackKm, routeEligible:routeEligible, state:state};
+}
+
+function allTriggers(){
+  return POI.map(trigger).sort(function(a,b){
+    var da=isFinite(a.aheadKm)?a.aheadKm:Infinity, db=isFinite(b.aheadKm)?b.aheadKm:Infinity;
+    return da-db;
+  });
+}
+
+function doTick(){
+  var c = currentPos();
+  if (!c) return;
+  ensureRouteMeta();
+  var rp = routePosition();
+  var list = allTriggers();
+
+  /*
+   * 核心变化：自动播报按“沿路线距离”触发。
+   * 5km 以内进入预告区，2km 以内临近，0.5km 以内视为到达。
+   * 同一轮最多播报一条，避免进入城区后同时播报酒店/美食/景点。
+   */
+  var candidates = list.filter(function(t){
+    return !announced[t.p.id] && t.routeEligible && t.aheadKm >= 0 && t.aheadKm <= 0.5;
+  });
+  if (!candidates.length) {
+    candidates = list.filter(function(t){
+      return !announced[t.p.id] && t.routeEligible && t.aheadKm >= 0 && t.aheadKm <= t.p.r;
+    });
+  }
+  if (running && candidates.length && !saying){
+    var t = candidates[0];
+    announced[t.p.id] = true;
+    saveAnnounced();
+    var say = t.p.say || (t.p.name + "到了");
+    logAdd(t.p, "已播报 · 沿路线约"+fmtKm(Math.max(0,t.aheadKm))+"前");
+    enqueue(t.p, say);
+  }
+
+  // 更新 UI
+  var jdz = POI.find(function(p){return p.id==="jdz";});
+  var jdzAhead = jdz ? routeAheadKm(jdz) : Infinity;
+  distToJdz = fmtKm(Math.max(0,jdzAhead));
+  document.getElementById("distJdz").textContent = isFinite(jdzAhead) ? (jdzAhead<=0 ? "已到达" : distToJdz) : "--";
+  document.getElementById("speed").textContent = (c.speed!=null && c.speed>=0) ? Math.round(c.speed*3.6)+" km/h" : "--";
+  var done = Object.keys(announced).length;
+  document.getElementById("doneCnt").textContent = done;
+  refreshList(list.filter(function(t){ return t.routeEligible && t.aheadKm>=0 && t.aheadKm<=5; }).slice(0,5));
+
+  var next = list.find(function(t){ return !announced[t.p.id] && t.routeEligible && t.aheadKm>=0; });
+  var nextEl=document.getElementById("nextPoint");
+  if (nextEl){
+    if (next){
+      var stage = next.aheadKm<=0.5 ? "即将到达" : (next.aheadKm<=2 ? "近距离预告" : "提前预告");
+      nextEl.innerHTML = '<div><b>'+stage+' · '+next.p.name+'</b></div>' +
+        '<div class="routeMetric"><span class="metric">沿路线 <b>'+fmtKm(next.aheadKm)+'</b></span><span class="metric">偏离主路线 <b>'+fmtKm(next.crossTrackKm)+'</b></span><span class="metric">直线距离 <b>'+fmtKm(next.d)+'</b></span></div>';
+    } else {
+      nextEl.textContent = "当前路线前方暂无待播报点位。";
+    }
+  }
+  if (map){
+    list.forEach(function(t){ setMarker(t.p, t.state); });
+  }
+}
+
+function fmtKm(km){
+  if (!isFinite(km)) return "--";
+  return km>=100 ? km.toFixed(0)+" km" : km>=10 ? km.toFixed(1)+" km" : km.toFixed(2)+" km";
+}
+
+function showSay(p, say){
+  document.getElementById("sayText").textContent = "📍 " + p.name + " —— " + say;
+  document.getElementById("sayText").classList.remove("empty");
+  document.getElementById("sayTag").textContent = "正在播报 · " + TYPE_TXT[p.type] + (p.day?" / Day"+p.day:"");
+}
+
+function logAdd(p, info){
+  var now = new Date();
+  var ts = ("0"+now.getHours()).slice(-2)+":"+("0"+now.getMinutes()).slice(-2)+":"+("0"+now.getSeconds()).slice(-2);
+  logs.unshift({ts:ts, name:p.name, info:info});
+  logs = logs.slice(0, 8);
+  var el = document.getElementById("logList");
+  if (logs.length){
+    el.innerHTML = logs.map(function(l){
+      return '<div class="logline">'+l.ts+' · '+l.name+' <span style="color:var(--dim)">'+l.info+'</span></div>';
+    }).join("");
+  }
+}
+
+function refreshList(near){
+  var nearEl = document.getElementById("nearItems");
+  if (nearEl){
+    nearEl.innerHTML = near.slice(0,5).map(function(t){
+      var p=t.p;
+      var distText=isFinite(t.aheadKm) ? fmtKm(Math.max(0,t.aheadKm)) : fmtKm(t.d);
+      var status=announced[p.id]?"已播报":(t.aheadKm<=0.5?"即将到达":"前方");
+      return '<div class="item"><div style="flex:1"><span class="pill '+TYPE_PILL[p.type]+'">'+TYPE_TXT[p.type]+'</span><span class="pill day">Day'+p.day+'</span>'+(isTopSpot(p)?'<span class="pill top">⭐高分</span>':'')+'<span class="pill '+(announced[p.id]?"done":"soon")+'">'+status+'</span><div class="nm">'+p.name+(p.rate!=null?' <b style="color:#ffb84d">★'+p.rate+'</b>':'')+'</div><div class="ds">'+p.desc+' · 偏离主路线约'+fmtKm(t.crossTrackKm)+'</div></div><div class="dist">'+distText+'</div></div>';
+    }).join("");
+  }
+}
+
+function renderAll(){
+  var el = document.getElementById("listAll");
+  var sorted = POI.slice().sort(function(a,b){return a.day-b.day;});
+  el.innerHTML = sorted.map(function(p){
+    var t = trigger(p);
+    var pillTop = (isTopSpot && isTopSpot(p)) ? '<span class="pill top">⭐高分</span>' : '';
+    var rateTxt = (p.rate!=null) ? ' <b style="color:#ffb84d">★'+p.rate+'</b>' : '';
+    var introHtml = (p.intro) ? '<span style="display:block;color:#b9cdf5;margin-top:2px">'+p.intro+'</span>' : '';
+    return '<div class="item" data-id="'+p.id+'"><div style="flex:1"><span class="pill '+TYPE_PILL[p.type]+'">'+TYPE_TXT[p.type]+'</span><span class="pill day">Day'+p.day+'</span>'+pillTop+'<span class="pill '+(announced[p.id]?"done":"soon")+'">'+(announced[p.id]?"已播报":"前方")+'</span><div class="nm">'+p.name+rateTxt+'</div><div class="ds">'+introHtml+p.desc+' · 距主路线约'+fmtKm(p._crossTrackKm==null?0:p._crossTrackKm)+'</div></div><div class="dist">'+(isFinite(t.aheadKm)?fmtKm(Math.max(0,t.aheadKm)):fmtKm(t.d))+'</div></div>';
+  }).join("");
+}
+
+/* ================= GPS ================= */
+function gpsOn(posData){
+  pos = {lat:posData.coords.latitude, lng:posData.coords.longitude, speed:posData.coords.speed};
+  document.getElementById("gpsSt").textContent = "已定位 ✅";
+  document.getElementById("gpsSt").style.color = "#35d0a0";
+  doTick();
+  if (map){
+    var c = currentPos();
+    if (mkrUser){ map.removeLayer(mkrUser); mkrUser=null; }
+    mkrUser = L.marker([c.lat,c.lng], {icon:userIcon}).addTo(map);
+    mkrUser.bindPopup("当前定位");
+  }
+}
+var mkrUser = null;
+
+function gpsErr(err){
+  var msg = "";
+  if (err && err.code===1) msg = "已拒绝定位授权";
+  else if (err && err.code===2) msg = "定位不可用";
+  else if (err && err.code===3) msg = "定位超时";
+  else msg = "定位失败";
+  document.getElementById("gpsSt").textContent = "⚠ " + msg;
+  document.getElementById("gpsSt").style.color = "#ff6b6b";
+  if (running){ document.getElementById("sayText").textContent = "⚠ 定位未开启：请允许浏览器访问位置（手机需打开定位服务）。"; document.getElementById("sayText").classList.remove("empty"); }
+}
+
+var watchId = null;
+function startNav(){
+  if (!('speechSynthesis' in window)){
+    document.getElementById("sayText").textContent = "⚠ 当前浏览器不支持语音播报，请改用 Safari / Chrome。";
+    document.getElementById("sayText").classList.remove("empty");
+    return;
+  }
+  announceAndStart();
+  if (!navigator.geolocation){
+    gpsErr({code:2}); return;
+  }
+  if (watchId==null){
+    watchId = navigator.geolocation.watchPosition(gpsOn, gpsErr, {enableHighAccuracy:true, maximumAge:10000, timeout:20000});
+  }
+  document.getElementById("btnStart").style.display = "none";
+  document.getElementById("btnStop").style.display = "";
+  document.getElementById("btnStart").parentNode.style.display = "none";
+  document.getElementById("btnTest").style.display = "none";
+}
+
+function announceAndStart(){
+  running = true;
+  flushSay();
+  showSay({name:"语音助手", type:"t", day:0}, "语音播报已开启。行车请勿分心，由副驾驶操作本页。祝你一路顺风。");
+  enqueue({name:"语音助手", type:"t", day:0}, "语音播报已开启，祝你一路顺风！");
+}
+function stopNav(){
+  running = false;
+  flushSay();
+  if (watchId!=null){ navigator.geolocation.clearWatch(watchId); watchId=null; }
+  document.getElementById("btnStart").style.display = "";
+  document.getElementById("btnStart").parentNode.style.display = "";
+  document.getElementById("btnTest").style.display = "";
+  document.getElementById("btnStop").style.display = "none";
+  document.getElementById("sayText").textContent = "已停止播报。再次点击开启可继续（不重复播报已播过的点）。";
+  document.getElementById("sayText").classList.remove("empty");
+}
+function testTTS(){
+  speak("测试成功：语音播报正常。靠近景点时会自动提醒你。");
+  showSay({name:"语音测试", type:"t", day:0}, "测试成功，语音播报正常，靠近点位时会自动提醒。");
+}
+function resetAnnounced(){
+  flushSay();
+  announced = {}; saveAnnounced();
+  document.getElementById("sayText").textContent = "已重置全部播报记录，所有点位可重新播报。";
+  document.getElementById("sayText").classList.remove("empty");
+  renderAll(); doTick();
+}
+
+/* ================= 模拟位置 ================= */
+function fillSim(){
+  var sel = document.getElementById("simSel");
+  POI.slice().sort(function(a,b){return a.day-b.day;}).forEach(function(p){
+    var o = document.createElement("option");
+    o.value = p.id;
+    o.textContent = "Day"+p.day+" · " + p.name;
+    sel.appendChild(o);
+  });
+  sel.addEventListener("change", function(){
+    if (!sel.value){ simPos=null; document.getElementById("gpsSt").textContent = "使用真实 GPS"; return; }
+    var p = POI.find(function(x){return x.id===sel.value;});
+    simPos = {lat:p.lat, lng:p.lng};
+    document.getElementById("gpsSt").textContent = "模拟位置："+p.name;
+    document.getElementById("gpsSt").style.color = "#ffb84d";
+    doTick();
+  });
+}
+
+/* ================= 地图 ================= */
+var userIcon = null;
+var layers = {};
+function initMap(){
+  try{
+    if (!window.L) { document.getElementById("map").innerHTML = '<div class="note">在线地图资源未加载（可能离线）。离线仍可正常语音播报。</div>'; return; }
+    userIcon = L.icon({iconUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png", iconSize:[25,41], iconAnchor:[12,41]});
+    map = L.map("map").setView([29.9, 118.4], 8);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution:'© OpenStreetMap'}).addTo(map);
+    L.polyline(WAYPOINTS, {color:"#4f8bff", weight:3, dashArray:"6 6"}).addTo(map);
+    ["a","h","f","t","s"].forEach(function(t){ layers[t] = L.layerGroup().addTo(map); });
+    POI.forEach(function(p){ addMarker(p); });
+    addLegend();
+    setTimeout(function(){ if (map) map.invalidateSize(); }, 150);
+  }catch(e){
+    document.getElementById("map").innerHTML = '<div class="note">地图加载失败，不影响语音播报。</div>';
+  }
+}
+function isTopSpot(p){ return p.type==="a" && p.rate!=null && p.rate>=4.7; }
+function markerBadge(p){
+  if (p.type==="a"){
+    if (announced[p.id]) return '<div style="width:30px;height:30px;border-radius:50%;background:#35d0a0;color:#0b3d30;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55)">★'+(p.rate!=null?p.rate:"")+'</div>';
+    if (isTopSpot(p)) return '<div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(160deg,#ffd24d,#ffb84d);color:#5a3d00;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 0 0 3px #ffb84d66,0 2px 6px rgba(0,0,0,.5)">★'+(p.rate!=null?p.rate:"")+'</div>';
+    return '<div style="width:26px;height:26px;border-radius:50%;background:#ff6b6b;color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55)">景</div>';
+  }
+  var col = announced[p.id] ? "#35d0a0" : (TYPE_COLOR[p.type] || "#9cc0ff");
+  var big = (p.type==="h" || p.type==="f");
+  var size = big ? 24 : 18;
+  return '<div style="width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+col+';color:#152238;font-size:'+(big?11:10)+'px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55)">'+(TYPE_LABEL[p.type]||"")+'</div>';
+}
+function addMarker(p){
+  if (!map || !layers[p.type]) return;
+  var ic = L.divIcon({className:"", html:markerBadge(p), iconSize:[40,40], iconAnchor:[20,20]});
+  var m = L.marker([p.lat, p.lng], {icon:ic}).addTo(layers[p.type]);
+  var rateHtml = (p.rate!=null) ? '<b style="color:#ffb84d">★'+p.rate+'</b> ' : '';
+  var introHtml = (p.intro) ? '<div style="margin:6px 0 4px;font-size:12px;color:#e8eefc;line-height:1.6">'+p.intro+'</div>' : '';
+  m.bindPopup('<b>'+p.name+'</b> '+rateHtml+'<br style="font-size:4px">'+introHtml+
+    '<div style="font-size:11px;color:#93a5cf">'+(p.desc||"")+' · Day'+p.day+' · 触发半径约'+p.r+'km'+(p.tip?" · "+p.tip:"")+'</div>');
+  m.on("click", function(){ spotSpeak(p); });
+  mkrList[p.id] = m;
+}
+function setMarker(p, state){
+  if (!map || !mkrList[p.id]) return;
+}
+function addLegend(){
+  var lc = L.control({position:"bottomleft"});
+  lc.onAdd = function(){
+    var div = L.DomUtil.create("div", "maplegend");
+    div.style.background = "rgba(15,23,42,.92)";
+    div.style.border = "1px solid #2c3e6b";
+    div.style.borderRadius = "10px";
+    div.style.padding = "8px 10px";
+    div.style.fontSize = "12px";
+    div.style.color = "#e8eefc";
+    div.style.lineHeight = "2";
+    var rows = ["a","h","f","t","s"].map(function(t){
+      return '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap">'+
+        '<input type="checkbox" checked data-t="'+t+'" style="width:14px;height:14px">'+
+        '<span style="color:'+TYPE_COLOR[t]+'">●</span> '+TYPE_TXT[t]+'</label>';
+    }).join("");
+    div.innerHTML = 
+      '<div id="lgHead" style="display:flex;align-items:center;justify-content:space-between;gap:16px;cursor:pointer;font-weight:700">'+
+        '<span>图例（金色★=高分）</span><span id="lgArrow" style="color:#93a5cf">▾</span></div>'+
+      '<div id="lgBody">'+rows+
+      '<div style="font-size:11px;color:#93a5cf;margin-top:4px;border-top:1px dashed #2c3e6b;padding-top:4px">点标注或列表可语音介绍；右上角⛶可全屏地图</div></div>';
+    div.querySelector("#lgHead").addEventListener("click", function(){
+      var body = div.querySelector("#lgBody");
+      var hidden = (body.style.display === "none");
+      body.style.display = hidden ? "" : "none";
+      div.querySelector("#lgArrow").textContent = hidden ? "▾" : "▸";
+    });
+    div.querySelectorAll("input").forEach(function(cb){
+      cb.addEventListener("change", function(){
+        var l = layers[cb.getAttribute("data-t")];
+        if (!l) return;
+        if (cb.checked) map.addLayer(l); else map.removeLayer(l);
+      });
+    });
+    return div;
+  };
+  lc.addTo(map);
+}
+
+/* ================= 全屏地图 ================= */
+function initFullscreen(){
+  var zoomBtn = document.getElementById("btnZoom");
+  if (!zoomBtn || !window.L) return;
+  zoomBtn.style.display = "block";
+  var ov = document.createElement("div");
+  ov.id = "fsOverlay";
+  ov.innerHTML = '<div id="fsBar"><b>🗺 全屏地图</b><button id="btnCloseFs">✕ 退出</button></div><div id="fsMapHolder"></div>';
+  document.body.appendChild(ov);
+  document.getElementById("btnCloseFs").addEventListener("click", closeFullscreen);
+  window.addEventListener("resize", function(){
+    if (map && document.getElementById("fsOverlay").style.display !== "none") map.invalidateSize();
+  });
+}
+function openFullscreen(){
+  var ov = document.getElementById("fsOverlay");
+  if (!ov || !map) return;
+  document.getElementById("fsMapHolder").appendChild(document.getElementById("map"));
+  ov.style.display = "block";
+  setTimeout(function(){ map.invalidateSize(); }, 40);
+}
+function closeFullscreen(){
+  var ov = document.getElementById("fsOverlay");
+  if (!ov || !map) return;
+  document.getElementById("mapWrap").appendChild(document.getElementById("map"));
+  ov.style.display = "none";
+  setTimeout(function(){ map.invalidateSize(); }, 40);
+}
+
+/* ================= 初始化 ================= */
+document.getElementById("btnStart").addEventListener("click", startNav);
+document.getElementById("btnStop").addEventListener("click", stopNav);
+document.getElementById("btnStop").style.display = "none";
+document.getElementById("btnTest").addEventListener("click", testTTS);
+document.getElementById("btnReset").addEventListener("click", resetAnnounced);
+
+// tabs
+document.getElementById("tab1").addEventListener("click", function(){ setPnl(1); });
+document.getElementById("tab2").addEventListener("click", function(){ setPnl(2); });
+document.getElementById("tab3").addEventListener("click", function(){ setPnl(3); renderAll(); });
+document.getElementById("listAll").addEventListener("click", function(e){
+  var it = e.target.closest ? e.target.closest(".item") : null;
+  if (!it) return;
+  var p = POI.find(function(x){ return x.id===it.getAttribute("data-id"); });
+  if (p) spotSpeak(p);
+});
+function setPnl(n){
+  [1,2,3].forEach(function(i){
+    document.getElementById("pnl"+i).classList.toggle("on", i===n);
+    document.getElementById("tab"+i).classList.toggle("on", i===n);
+  });
+}
+
+// 主面板附近点位容器（插入到日志上方）
+var logCard = document.getElementById("logList").parentNode;
+var nearCard = document.createElement("div");
+nearCard.className = "card";
+nearCard.innerHTML = '<h4>附近点位（按距离）</h4><div id="nearItems"><div class="note">定位生效后自动刷新。</div></div>';
+logCard.parentNode.insertBefore(nearCard, logCard);
+
+buildRouteModel();
+ensureRouteMeta();
+fillSim();
+fillVoices();
+setTimeout(fillVoices, 500);
+renderAll();
+initMap();
+initFullscreen();
+
+// 每 5 秒刷新一次
+setInterval(doTick, 5000);
+</script>
+</body>
+</html>
