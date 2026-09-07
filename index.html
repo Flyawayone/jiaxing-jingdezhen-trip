@@ -424,15 +424,22 @@ function fillVoices(){
 
 function speak(text){
   if (!('speechSynthesis' in window)) return false;
+  var myTok = ++sayToken;
   saying = false;
   speechSynthesis.cancel();
   var u = speakUtter(text);
+  saying = true;
   speechSynthesis.speak(u);
+  u.onend = function(){ if (myTok===sayToken){ saying = false; setTimeout(pumpSay, 700); } };
+  setTimeout(function(){
+    if (myTok===sayToken && saying){ try{ speechSynthesis.cancel(); }catch(e){} saying = false; setTimeout(pumpSay, 700); }
+  }, 9000 + text.length*180);
   return true;
 }
 
 var sayQueue = [];
 var saying = false;
+var sayToken = 0;
 
 function speakUtter(text){
   var u = new SpeechSynthesisUtterance(text);
@@ -443,6 +450,7 @@ function speakUtter(text){
 }
 
 function flushSay(){
+  sayToken++;
   sayQueue = [];
   saying = false;
   try{ speechSynthesis.cancel(); }catch(e){}
@@ -456,13 +464,14 @@ function enqueue(p, say){
 function pumpSay(){
   if (!running || saying || !sayQueue.length) return;
   var it = sayQueue.shift();
+  var myTok = ++sayToken;
   saying = true;
   showSay(it.p, it.say);
   var u = speakUtter(it.say);
   speechSynthesis.speak(u);
-  u.onend = function(){ saying = false; setTimeout(pumpSay, 700); };
+  u.onend = function(){ if (myTok===sayToken){ saying = false; setTimeout(pumpSay, 700); } };
   setTimeout(function(){
-    if (saying){ try{ speechSynthesis.cancel(); }catch(e){} saying = false; setTimeout(pumpSay, 700); }
+    if (myTok===sayToken && saying){ try{ speechSynthesis.cancel(); }catch(e){} saying = false; setTimeout(pumpSay, 700); }
   }, 9000 + it.say.length*180);
 }
 
@@ -479,12 +488,9 @@ function spotText(p){
 function spotSpeak(p){
   if (!p || !('speechSynthesis' in window)) return;
   var text = spotText(p);
-  if (running){
-    enqueue(p, text);
-  } else {
-    showSay(p, text);
-    speak(text);
-  }
+  flushSay();
+  showSay(p, text);
+  speak(text);
 }
 
 /* ================= 点位 ================= */
