@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>嘉兴→景德镇 自驾语音助手</title>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<!-- 高德地图 JS API 2.0 在线加载，按官方要求不要本地打包。 -->
 <style>
   :root{
     --bg:#0f172a; --card:#182442; --card2:#1f2f52; --line:#2c3e6b;
@@ -100,6 +100,11 @@
       <span class="tag" id="sayTag">等待播报</span>
       <div class="say empty" id="sayText">开启导航后，靠近沿途景点、美食、住宿推荐与途经城市时，会自动语音播报。</div>
     </div>
+    <div class="card" id="nextCard">
+      <h4>前方下一播报点</h4>
+      <div id="nextName" class="nm">暂无</div>
+      <div id="nextMeta" class="txt">开启 GPS 后显示真实道路距离。</div>
+    </div>
 
     <div class="btns">
       <button id="btnStart" class="btn-main">▶ 开启语音播报</button>
@@ -111,11 +116,23 @@
     </div>
 
     <div class="card">
+      <h4>高德真实路线</h4>
+      <select id="stageSel">
+        <option value="auto">— 自动判断当前行程阶段 —</option>
+        <option value="day1">Day 1：嘉兴 → 黄山</option>
+        <option value="day3">Day 3：黄山 → 景德镇</option>
+        <option value="day5">Day 5：景德镇 → 婺源 → 嘉兴</option>
+      </select>
+      <div class="routeMetric"><span class="metric">路线：<b id="routeStatus">未加载</b></span><span class="metric">路线总长：<b id="routeTotal">--</b></span><span class="metric">来源：<b id="routeSource">高德</b></span></div>
+      <div class="note">启用 GPS 后只使用高德驾车规划返回的真实道路路线计算“前方距离”。偏离主路线明显时自动重新规划；测试模式可手动切换阶段。</div>
+    </div>
+
+    <div class="card">
       <h4>手动模拟位置（测试用，不开车也能试）</h4>
       <select id="simSel">
         <option value="">— 未模拟，使用真实 GPS —</option>
       </select>
-      <div class="note">选一个地点后会立即以该处触发一次播报逻辑，用于出发前预演。真实导航会优先使用“沿路线距离”，不再单纯按直线距离触发。</div>
+      <div class="note">选一个地点后会立即用当前高德真实道路路线计算播报逻辑，用于出发前预演；没有高德真实路线时不会用旧的近似路线冒充真实道路距离。</div>
     </div>
 
     <div class="card">
@@ -199,9 +216,16 @@
   </section>
 </main>
 
-<div class="foot">该文件可离线使用（语音播报不依赖网络）；在线时自动加载地图。<br>文件仅在你本机运行，不上传任何数据。</div>
+<div class="foot">语音播报不依赖地图；高德地图与真实道路路线需要联网。<br>本地测试版：JS API Key/安全密钥写在文件中，仅适合个人开发测试；Web服务 Key 不要写进前端。</div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<!-- 先填写你自己的高德 Web 端(JS API) Key 与安全密钥。
+     不要把“Web服务 Key”写进这个前端文件；本版本用 AMap.Driving 获取驾车路线。 -->
+<script>
+window._AMapSecurityConfig = {
+  securityJsCode: "001ccff08b6ba236a677ff3b6b7efd5d"
+};
+</script>
+<script src="https://webapi.amap.com/loader.js"></script>
 <script>
 "use strict";
 
@@ -343,16 +367,39 @@ var POI = [
    say:"前方龙岗服务区：进入山区高速前的补给点，建议加油和休息，之后到黄山服务区间隔较长。", desc:"位置为估算，以实际路牌为准。", tip:"山区路段提前加油。"}
 ];
 
-var WAYPOINTS = [
-  [30.766,120.750],[30.893,120.087],[30.267,120.153],[30.234,119.717],
-  [30.220,119.370],[30.213,119.163],[30.238,119.262],[29.872,118.414],[29.715,118.301],
-  [29.783,118.190],[29.249,117.861],[29.270,117.178]
-];
 
 var TYPE_TXT = {a:"景点",h:"住宿",t:"途经",s:"服务区",f:"美食"};
 var TYPE_PILL = {a:"a",h:"h",t:"t",s:"s",f:"f"};
 var TYPE_LABEL = {a:"景",h:"住",t:"途",s:"服",f:"吃"};
 var TYPE_COLOR = {a:"#ff6b6b", h:"#7fe8c2", t:"#9cc0ff", s:"#ffc88a", f:"#ffe9a3"};
+
+/* ================= 高德配置 ================= */
+var AMAP_KEY = "857727e51808dfbb50ec4f9862889334";
+var AMAP_VERSION = "2.0";
+var amapReady = false;
+var amapLoading = false;
+var amapError = "";
+var driving = null;
+var amapRoute = {
+  stage: "",
+  status: "idle",
+  route: null,
+  path: [],
+  cumulativeKm: [],
+  totalKm: 0,
+  lastOrigin: null,
+  destination: null,
+  waypoints: [],
+  updatedAt: 0
+};
+
+/* 行程阶段：严格沿用原页面的三段自驾计划。 */
+var ROUTE_STAGES = {
+  day1: {name:"Day 1：嘉兴 → 黄山", start:[120.750,30.766], destination:[118.176,30.121], waypoints:[]},
+  day3: {name:"Day 3：黄山 → 景德镇", start:[118.301,29.715], destination:[117.178,29.270], waypoints:[]},
+  day5: {name:"Day 5：景德镇 → 婺源 → 嘉兴", start:[117.178,29.270], destination:[120.750,30.766], waypoints:[[117.861,29.249]]}
+};
+var stageKey = "auto";
 
 /* ================= 状态 ================= */
 var running = false;
@@ -361,93 +408,191 @@ try { announced = JSON.parse(localStorage.getItem("jx_jdz_announced")||"{}"); } 
 var logs = [];
 var pos = null;        // 当前位置 {lat,lng,speed}
 var simPos = null;     // 模拟位置
-var map = null, mkrList = {};
 var distToJdz = "";
 
-/* ================= 路线距离模型 =================
- * 目标：自动播报优先采用“车辆沿预设路线前进了多少公里”，而不是当前位置与 POI 的直线距离。
- * WAYPOINTS 是人工设置的路线锚点，因此这里采用“分段投影 + 累积里程”的近似模型。
- * 对不在主路线附近的点位，只有在路线走廊内才允许自动播报。
+/* ================= 高德真实道路路线模型 =================
+ * 核心规则：只要高德真实驾车路线可用，所有“前方距离/播报距离/下一点位”均基于高德返回的真实道路折线。
+ * 不再使用旧版 WAYPOINTS/近似路线作为播报距离来源。
  */
-var ROUTE = { points: [], cumulativeKm: [], totalKm: 0 };
-var ROUTE_CORRIDOR_DEFAULT = 8; // POI 距主路线超过该值时，不自动播报（手动点选仍可播报）
-var ANNOUNCE_AHEAD_KM = [5, 2, 0.5]; // 未来三个阶段：预告/临近/到达
-
 function toXY(lat, lng, refLat){
-  var kx = 111.32 * Math.cos(refLat * Math.PI / 180);
-  var ky = 111.32;
-  return {x: lng * kx, y: lat * ky};
+  var kx=111.32*Math.cos(refLat*Math.PI/180);
+  var ky=111.32;
+  return {x:lng*kx,y:lat*ky};
 }
-
-function projectToSegment(px, py, ax, ay, bx, by){
-  var dx = bx-ax, dy = by-ay;
-  var len2 = dx*dx + dy*dy;
-  var t = len2 ? ((px-ax)*dx + (py-ay)*dy)/len2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  var qx = ax + t*dx, qy = ay + t*dy;
-  var d = Math.hypot(px-qx, py-qy);
-  return {t:t, x:qx, y:qy, distKm:d};
+function projectToSegment(px,py,ax,ay,bx,by){
+  var dx=bx-ax,dy=by-ay,len2=dx*dx+dy*dy;
+  var t=len2?((px-ax)*dx+(py-ay)*dy)/len2:0;
+  t=Math.max(0,Math.min(1,t));
+  var qx=ax+t*dx,qy=ay+t*dy;
+  return {t:t,x:qx,y:qy,distKm:Math.hypot(px-qx,py-qy)};
 }
-
-function buildRouteModel(){
-  var pts = WAYPOINTS.map(function(p){ return {lat:p[0], lng:p[1]}; });
-  ROUTE.points = pts;
-  ROUTE.cumulativeKm = [0];
-  var total = 0;
-  for (var i=1;i<pts.length;i++) {
-    total += haversine(pts[i-1], pts[i]);
-    ROUTE.cumulativeKm.push(total);
+function haversine(a,b){
+  var R=6371, dLat=(b.lat-a.lat)*Math.PI/180, dLng=(b.lng-a.lng)*Math.PI/180;
+  var s=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+  return 2*R*Math.asin(Math.sqrt(s));
+}
+function pathPointXY(pt){
+  if (!pt) return null;
+  var lng = (typeof pt.getLng === "function") ? pt.getLng() : pt.lng;
+  var lat = (typeof pt.getLat === "function") ? pt.getLat() : pt.lat;
+  return {lng:Number(lng), lat:Number(lat)};
+}
+function buildAmapPath(route){
+  var path=[];
+  if (!route || !route.steps) return path;
+  route.steps.forEach(function(step){
+    (step.path || []).forEach(function(pt){
+      var q=pathPointXY(pt);
+      if (!q || !isFinite(q.lng) || !isFinite(q.lat)) return;
+      var last=path[path.length-1];
+      if (!last || haversine({lat:last.lat,lng:last.lng},{lat:q.lat,lng:q.lng})>0.001) path.push(q);
+    });
+  });
+  return path;
+}
+function buildRealRouteModel(path, totalMeters){
+  var cum=[0], total=0;
+  for(var i=1;i<path.length;i++){
+    total += haversine({lat:path[i-1].lat,lng:path[i-1].lng},{lat:path[i].lat,lng:path[i].lng});
+    cum.push(total);
   }
-  ROUTE.totalKm = total;
+  var targetKm = Number(totalMeters)/1000;
+  if (isFinite(targetKm) && targetKm>0 && total>0){
+    var scale=targetKm/total;
+    cum=cum.map(function(v){return v*scale;});
+    total=targetKm;
+  }
+  amapRoute.path=path;
+  amapRoute.cumulativeKm=cum;
+  amapRoute.totalKm=total;
 }
-
-function projectToRoute(lat,lng){
-  if (!ROUTE.points.length) buildRouteModel();
-  var best = null;
-  var refLat = lat;
-  var q = toXY(lat,lng,refLat);
-  for (var i=0;i<ROUTE.points.length-1;i++) {
-    var a = ROUTE.points[i], b = ROUTE.points[i+1];
-    var aa = toXY(a.lat,a.lng,refLat), bb = toXY(b.lat,b.lng,refLat);
-    var pr = projectToSegment(q.x,q.y,aa.x,aa.y,bb.x,bb.y);
-    if (!best || pr.distKm < best.crossTrackKm) {
-      var segKm = haversine(a,b);
-      best = {
-        segment:i,
-        t:pr.t,
-        crossTrackKm:pr.distKm,
-        routeKm:ROUTE.cumulativeKm[i] + segKm*pr.t
-      };
+function projectPointToPath(lat,lng){
+  var path=amapRoute.path;
+  if(!path.length) return null;
+  var best=null, refLat=lat, q=toXY(lat,lng,refLat);
+  for(var i=0;i<path.length-1;i++){
+    var a=path[i], b=path[i+1];
+    var aa=toXY(a.lat,a.lng,refLat), bb=toXY(b.lat,b.lng,refLat);
+    var pr=projectToSegment(q.x,q.y,aa.x,aa.y,bb.x,bb.y);
+    if(!best || pr.distKm<best.crossTrackKm){
+      var segKm=haversine({lat:a.lat,lng:a.lng},{lat:b.lat,lng:b.lng});
+      best={segment:i,t:pr.t,crossTrackKm:pr.distKm,routeKm:amapRoute.cumulativeKm[i]+segKm*pr.t};
     }
   }
   return best;
 }
-
-function ensureRouteMeta(){
-  if (!ROUTE.points.length) buildRouteModel();
-  POI.forEach(function(p){
-    if (p._routeKm == null || p._crossTrackKm == null){
-      var r = projectToRoute(p.lat,p.lng);
-      p._routeKm = r ? r.routeKm : Infinity;
-      p._crossTrackKm = r ? r.crossTrackKm : Infinity;
-      if (p.corridorKm == null) p.corridorKm = ROUTE_CORRIDOR_DEFAULT;
-    }
-  });
-}
-
-function routePosition(){
+function currentRoutePosition(){
   var c=currentPos();
-  if (!c) return null;
-  ensureRouteMeta();
-  var r=projectToRoute(c.lat,c.lng);
-  if (!r) return null;
-  return {routeKm:r.routeKm,crossTrackKm:r.crossTrackKm};
+  if(!c || !amapRoute.path.length) return null;
+  return projectPointToPath(c.lat,c.lng);
+}
+function realRouteAheadKm(p){
+  if (!amapRoute.path.length) return Infinity;
+  if (p._amapRouteStage!==amapRoute.stage || p._amapRouteVersion!==amapRoute.updatedAt){
+    var pr=projectPointToPath(p.lat,p.lng);
+    p._amapRouteStage=amapRoute.stage;
+    p._amapRouteVersion=amapRoute.updatedAt;
+    p._realRouteKm=pr ? pr.routeKm : Infinity;
+    p._realCrossTrackKm=pr ? pr.crossTrackKm : Infinity;
+  }
+  var rp=currentRoutePosition();
+  if(!rp || !isFinite(p._realRouteKm)) return Infinity;
+  return p._realRouteKm-rp.routeKm;
 }
 
-function routeAheadKm(p){
-  var rp=routePosition();
-  if (!rp || p._routeKm==null) return Infinity;
-  return p._routeKm-rp.routeKm;
+function getCurrentStageByPosition(){
+  if(stageKey!=="auto") return stageKey;
+  var c=currentPos();
+  if(!c) return "day1";
+  var stages=[
+    {key:"day1", start:ROUTE_STAGES.day1.start, end:ROUTE_STAGES.day1.destination},
+    {key:"day3", start:ROUTE_STAGES.day3.start, end:ROUTE_STAGES.day3.destination},
+    {key:"day5", start:ROUTE_STAGES.day5.start, end:ROUTE_STAGES.day5.destination}
+  ];
+  var best=stages[0], bestScore=Infinity;
+  stages.forEach(function(s){
+    var ds=haversine({lat:c.lat,lng:c.lng},{lat:s.start[1],lng:s.start[0]});
+    var de=haversine({lat:c.lat,lng:c.lng},{lat:s.end[1],lng:s.end[0]});
+    // 起点附近优先；远离某段终点则降低该段概率。用于选择“当前行程阶段”，不用于道路距离计算。
+    var score=Math.min(ds,de*0.65);
+    if(score<bestScore){best=s;bestScore=score;}
+  });
+  // 在黄山附近默认继续使用 Day3；在景德镇/婺源区域默认使用 Day5。
+  var dToH=haversine({lat:c.lat,lng:c.lng},{lat:30.121,lng:118.176});
+  var dToJ=haversine({lat:c.lat,lng:c.lng},{lat:29.270,lng:117.178});
+  var dToWy=haversine({lat:c.lat,lng:c.lng},{lat:29.249,lng:117.861});
+  if(dToH<35) return "day3";
+  if(dToJ<40 || dToWy<45) return "day5";
+  if(dToJ<120 && dToH<180) return "day3";
+  return best.key;
+}
+
+function setRouteStatus(text){
+  var el=document.getElementById("routeStatus");
+  if(el) el.textContent=text;
+  var total=document.getElementById("routeTotal");
+  if(total) total.textContent=amapRoute.totalKm?fmtKm(amapRoute.totalKm):"--";
+  var source=document.getElementById("routeSource");
+  if(source) source.textContent=amapReady?"高德真实道路":"近似路线";
+}
+
+function clearRealRoute(){
+  amapRoute.route=null; amapRoute.path=[]; amapRoute.cumulativeKm=[]; amapRoute.totalKm=0;
+  amapRoute.status="idle"; amapRoute.updatedAt=Date.now();
+  POI.forEach(function(p){ delete p._realRouteKm; delete p._realCrossTrackKm; p._amapRouteStage=""; p._amapRouteVersion=0; });
+  setRouteStatus("未加载");
+}
+
+function chooseRouteEndpoints(stage, origin){
+  var s=ROUTE_STAGES[stage];
+  return {origin:origin || s.start, destination:s.destination, waypoints:s.waypoints || []};
+}
+
+function loadAmapAndRoute(origin){
+  var stage=getCurrentStageByPosition();
+  if(!ROUTE_STAGES[stage]) return;
+  if(!amapReady || !window.AMap){
+    setRouteStatus("高德未就绪");
+    return;
+  }
+  if(!driving){ driving=new AMap.Driving({policy: AMap.DrivingPolicy ? AMap.DrivingPolicy.LEAST_TIME : 0}); }
+  var ep=chooseRouteEndpoints(stage, origin);
+  amapRoute.stage=stage;
+  amapRoute.lastOrigin=ep.origin; amapRoute.destination=ep.destination; amapRoute.waypoints=ep.waypoints;
+  setRouteStatus("规划中");
+  var start=new AMap.LngLat(ep.origin[0],ep.origin[1]);
+  var end=new AMap.LngLat(ep.destination[0],ep.destination[1]);
+  var opts={waypoints:(ep.waypoints||[]).map(function(w){return new AMap.LngLat(w[0],w[1]);})};
+  var done=function(status,result){
+    if(status!=="complete" || !result || !result.routes || !result.routes.length){
+      amapRoute.status="error";
+      amapError="高德路线规划失败" + (result && result.info ? "："+result.info : "");
+      setRouteStatus("失败");
+      return;
+    }
+    var route=result.routes[0];
+    var path=buildAmapPath(route);
+    if(path.length<2){ setRouteStatus("无有效路线"); return; }
+    amapRoute.route=route; amapRoute.status="ready"; amapRoute.updatedAt=Date.now();
+    buildRealRouteModel(path, route.distance);
+    setRouteStatus("已就绪");
+    drawAmapRoute(path);
+    renderAll();
+    doTick();
+  };
+  if(opts.waypoints && opts.waypoints.length) driving.search(start,end,opts,done);
+  else driving.search(start,end,done);
+}
+
+function maybeRefreshAmapRoute(force){
+  if(!amapReady || !currentPos()) return;
+  var stage=getCurrentStageByPosition();
+  var now=Date.now();
+  var c=currentPos();
+  var rp=currentRoutePosition();
+  if(force || !amapRoute.path.length || amapRoute.stage!==stage || !rp || rp.crossTrackKm>1.2 || now-amapRoute.updatedAt>300000){
+    loadAmapAndRoute([c.lng,c.lat]);
+  }
 }
 
 function saveAnnounced(){ try{ localStorage.setItem("jx_jdz_announced", JSON.stringify(announced)); }catch(e){} }
@@ -597,12 +742,12 @@ function getDist(p){
 
 function trigger(p){
   var directKm = getDist(p);
-  var aheadKm = routeAheadKm(p);
-  var corridor = (p.corridorKm==null ? ROUTE_CORRIDOR_DEFAULT : p.corridorKm);
-  var routeEligible = isFinite(aheadKm) && p._crossTrackKm <= corridor && aheadKm >= -0.5;
+  var aheadKm = realRouteAheadKm(p);
+  var crossKm = (p._realCrossTrackKm==null?Infinity:p._realCrossTrackKm);
+  var routeEligible = isFinite(aheadKm) && crossKm <= 5 && aheadKm >= -0.5;
   var key = p.id;
   var state = announced[key] ? "done" : (routeEligible && aheadKm <= 5 ? "soon" : "");
-  return {p:p, d:directKm, aheadKm:aheadKm, crossTrackKm:p._crossTrackKm, routeEligible:routeEligible, state:state};
+  return {p:p,d:directKm,aheadKm:aheadKm,crossTrackKm:crossKm,routeEligible:routeEligible,state:state};
 }
 
 function allTriggers(){
@@ -612,59 +757,63 @@ function allTriggers(){
   });
 }
 
+var lastAutoRouteRefresh=0;
 function doTick(){
-  var c = currentPos();
-  if (!c) return;
-  ensureRouteMeta();
-  var rp = routePosition();
-  var list = allTriggers();
+  var c=currentPos();
+  if(!c) return;
 
-  /*
-   * 核心变化：自动播报按“沿路线距离”触发。
-   * 5km 以内进入预告区，2km 以内临近，0.5km 以内视为到达。
-   * 同一轮最多播报一条，避免进入城区后同时播报酒店/美食/景点。
-   */
-  var candidates = list.filter(function(t){
-    return !announced[t.p.id] && t.routeEligible && t.aheadKm >= 0 && t.aheadKm <= 0.5;
-  });
-  if (!candidates.length) {
-    candidates = list.filter(function(t){
-      return !announced[t.p.id] && t.routeEligible && t.aheadKm >= 0 && t.aheadKm <= t.p.r;
-    });
-  }
-  if (running && candidates.length && !saying){
-    var t = candidates[0];
-    announced[t.p.id] = true;
-    saveAnnounced();
-    var say = t.p.say || (t.p.name + "到了");
-    logAdd(t.p, "已播报 · 沿路线约"+fmtKm(Math.max(0,t.aheadKm))+"前");
-    enqueue(t.p, say);
-  }
-
-  // 更新 UI
-  var jdz = POI.find(function(p){return p.id==="jdz";});
-  var jdzAhead = jdz ? routeAheadKm(jdz) : Infinity;
-  distToJdz = fmtKm(Math.max(0,jdzAhead));
-  document.getElementById("distJdz").textContent = isFinite(jdzAhead) ? (jdzAhead<=0 ? "已到达" : distToJdz) : "--";
-  document.getElementById("speed").textContent = (c.speed!=null && c.speed>=0) ? Math.round(c.speed*3.6)+" km/h" : "--";
-  var done = Object.keys(announced).length;
-  document.getElementById("doneCnt").textContent = done;
-  refreshList(list.filter(function(t){ return t.routeEligible && t.aheadKm>=0 && t.aheadKm<=5; }).slice(0,5));
-
-  var next = list.find(function(t){ return !announced[t.p.id] && t.routeEligible && t.aheadKm>=0; });
-  var nextEl=document.getElementById("nextPoint");
-  if (nextEl){
-    if (next){
-      var stage = next.aheadKm<=0.5 ? "即将到达" : (next.aheadKm<=2 ? "近距离预告" : "提前预告");
-      nextEl.innerHTML = '<div><b>'+stage+' · '+next.p.name+'</b></div>' +
-        '<div class="routeMetric"><span class="metric">沿路线 <b>'+fmtKm(next.aheadKm)+'</b></span><span class="metric">偏离主路线 <b>'+fmtKm(next.crossTrackKm)+'</b></span><span class="metric">直线距离 <b>'+fmtKm(next.d)+'</b></span></div>';
+  // 高德真实路线是核心来源；没有真实路线时只更新界面，不执行自动播报。
+  if(amapReady){
+    var now=Date.now();
+    if(!amapRoute.path.length || amapRoute.stage!==getCurrentStageByPosition() || now-lastAutoRouteRefresh>300000){
+      lastAutoRouteRefresh=now;
+      maybeRefreshAmapRoute(!amapRoute.path.length);
     } else {
-      nextEl.textContent = "当前路线前方暂无待播报点位。";
+      var rp=currentRoutePosition();
+      if(rp && rp.crossTrackKm>1.2){
+        lastAutoRouteRefresh=now;
+        maybeRefreshAmapRoute(true);
+      }
     }
   }
-  if (map){
-    list.forEach(function(t){ setMarker(t.p, t.state); });
+
+  var list=allTriggers();
+  /*
+   * 核心：优先按高德真实道路折线的“沿道路距离”触发。
+   * 同一轮最多播报一条，且采用多级阈值：5km预告、2km临近、0.5km即将到达。
+   */
+  var best=null;
+  if(amapRoute.path.length){
+    for(var i=0;i<list.length;i++){
+      var t=list[i];
+      if(!t.routeEligible || announced[t.p.id] || t.aheadKm<0 || t.aheadKm>5) continue;
+    var threshold = t.aheadKm<=0.5 ? 0.5 : (t.aheadKm<=2 ? 2 : 5);
+    var key=t.p.id;
+    var level=t.aheadKm<=0.5?3:(t.aheadKm<=2?2:1);
+    var last=localStorage.getItem("jx_jdz_stage_"+key);
+    var lastLevel=last?Number(last):0;
+    if(level<=lastLevel) continue;
+      best=t; best._level=level; best._threshold=threshold; break;
+    }
   }
+  if(best){
+    announced[best.p.id]=true;
+    try{ localStorage.setItem("jx_jdz_stage_"+best.p.id,String(best._level)); }catch(e){}
+    saveAnnounced();
+    logAdd(best.p,"已播报 · 沿道路约"+fmtKm(Math.max(0,best.aheadKm))+"前");
+    if(running) enqueue(best.p, best.p.say || (best.p.name+"到了"));
+  }
+
+  var jdz=POI.find(function(p){return p.id==="jdz";});
+  var jdzAhead=jdz && amapRoute.path.length ? realRouteAheadKm(jdz) : Infinity;
+  distToJdz=fmtKm(Math.max(0,jdzAhead));
+  document.getElementById("distJdz").textContent=isFinite(jdzAhead)?distToJdz:"--";
+  document.getElementById("speed").textContent=(c.speed!=null && c.speed>=0)?Math.round(c.speed*3.6)+" km/h":"--";
+  document.getElementById("doneCnt").textContent=Object.keys(announced).length;
+  refreshList(list.filter(function(t){return t.routeEligible && t.aheadKm>=0 && t.aheadKm<=5;}).slice(0,5));
+  if(map) updateUserMarker(c);
+  updateNextCard(list);
+  if(amapRoute.path.length) setRouteStatus("已就绪");
 }
 
 function fmtKm(km){
@@ -691,6 +840,15 @@ function logAdd(p, info){
   }
 }
 
+function updateNextCard(list){
+  var nameEl=document.getElementById("nextName"), metaEl=document.getElementById("nextMeta");
+  if(!nameEl||!metaEl) return;
+  var next=list.find(function(t){return !announced[t.p.id]&&t.routeEligible&&t.aheadKm>=0;});
+  if(!next){nameEl.textContent="当前路线前方暂无待播报点位。";metaEl.textContent="继续行驶，系统会根据高德真实道路路线自动刷新。";return;}
+  nameEl.textContent=next.p.name;
+  metaEl.innerHTML='沿道路 <b>'+fmtKm(next.aheadKm)+'</b> · 偏离主路线约 <b>'+fmtKm(next.crossTrackKm)+'</b> · 直线 <b>'+fmtKm(next.d)+'</b>';
+}
+
 function refreshList(near){
   var nearEl = document.getElementById("nearItems");
   if (nearEl){
@@ -711,22 +869,19 @@ function renderAll(){
     var pillTop = (isTopSpot && isTopSpot(p)) ? '<span class="pill top">⭐高分</span>' : '';
     var rateTxt = (p.rate!=null) ? ' <b style="color:#ffb84d">★'+p.rate+'</b>' : '';
     var introHtml = (p.intro) ? '<span style="display:block;color:#b9cdf5;margin-top:2px">'+p.intro+'</span>' : '';
-    return '<div class="item" data-id="'+p.id+'"><div style="flex:1"><span class="pill '+TYPE_PILL[p.type]+'">'+TYPE_TXT[p.type]+'</span><span class="pill day">Day'+p.day+'</span>'+pillTop+'<span class="pill '+(announced[p.id]?"done":"soon")+'">'+(announced[p.id]?"已播报":"前方")+'</span><div class="nm">'+p.name+rateTxt+'</div><div class="ds">'+introHtml+p.desc+' · 距主路线约'+fmtKm(p._crossTrackKm==null?0:p._crossTrackKm)+'</div></div><div class="dist">'+(isFinite(t.aheadKm)?fmtKm(Math.max(0,t.aheadKm)):fmtKm(t.d))+'</div></div>';
+    return '<div class="item" data-id="'+p.id+'"><div style="flex:1"><span class="pill '+TYPE_PILL[p.type]+'">'+TYPE_TXT[p.type]+'</span><span class="pill day">Day'+p.day+'</span>'+pillTop+'<span class="pill '+(announced[p.id]?"done":"soon")+'">'+(announced[p.id]?"已播报":"前方")+'</span><div class="nm">'+p.name+rateTxt+'</div><div class="ds">'+introHtml+p.desc+(isFinite(t.crossTrackKm)?' · 距主路线约'+fmtKm(t.crossTrackKm):'')+'</div></div><div class="dist">'+(isFinite(t.aheadKm)?fmtKm(Math.max(0,t.aheadKm)):'--')+'</div></div>';
   }).join("");
 }
 
 /* ================= GPS ================= */
 function gpsOn(posData){
-  pos = {lat:posData.coords.latitude, lng:posData.coords.longitude, speed:posData.coords.speed};
-  document.getElementById("gpsSt").textContent = "已定位 ✅";
+  pos = {lat:posData.coords.latitude, lng:posData.coords.longitude, speed:posData.coords.speed, accuracy:posData.coords.accuracy};
+  var acc=Number(posData.coords.accuracy||0);
+  document.getElementById("gpsSt").textContent = "已定位 ✅" + (acc?" ±"+Math.round(acc)+"m":"");
   document.getElementById("gpsSt").style.color = "#35d0a0";
   doTick();
-  if (map){
-    var c = currentPos();
-    if (mkrUser){ map.removeLayer(mkrUser); mkrUser=null; }
-    mkrUser = L.marker([c.lat,c.lng], {icon:userIcon}).addTo(map);
-    mkrUser.bindPopup("当前定位");
-  }
+  if (map){ updateUserMarker(currentPos()); }
+  maybeRefreshAmapRoute(false);
 }
 var mkrUser = null;
 
@@ -802,100 +957,111 @@ function fillSim(){
   sel.addEventListener("change", function(){
     if (!sel.value){ simPos=null; document.getElementById("gpsSt").textContent = "使用真实 GPS"; return; }
     var p = POI.find(function(x){return x.id===sel.value;});
-    simPos = {lat:p.lat, lng:p.lng};
+    simPos = {lat:p.lat, lng:p.lng, speed:0};
     document.getElementById("gpsSt").textContent = "模拟位置："+p.name;
     document.getElementById("gpsSt").style.color = "#ffb84d";
     doTick();
   });
 }
 
-/* ================= 地图 ================= */
-var userIcon = null;
-var layers = {};
+/* ================= 高德地图 ================= */
+var map=null, layers={}, mkrList={}, mkrUser=null, routeLine=null;
+
+function loadAMap(){
+  if(amapReady || amapLoading) return;
+  if(AMAP_KEY.indexOf("在这里")===0){
+    setRouteStatus("请填写高德Key");
+    document.getElementById("map").innerHTML='<div class="note">请在 index.html 顶部附近把 AMAP_KEY 和 _AMapSecurityConfig.securityJsCode 替换成你自己的高德 Web端(JS API) Key 与安全密钥。</div>';
+    return;
+  }
+  amapLoading=true;
+  AMapLoader.load({key:AMAP_KEY,version:AMAP_VERSION,plugins:["AMap.Driving"]}).then(function(AMapLib){
+    window.AMap=AMapLib;
+    amapReady=true; amapLoading=false;
+    initMap();
+    if(currentPos()) maybeRefreshAmapRoute(true);
+    else setRouteStatus("等待GPS");
+  }).catch(function(err){
+    amapLoading=false; amapError=String(err||"");
+    setRouteStatus("加载失败");
+    document.getElementById("map").innerHTML='<div class="note">高德地图加载失败：'+escapeHtml(amapError)+'</div>';
+  });
+}
+
 function initMap(){
-  try{
-    if (!window.L) { document.getElementById("map").innerHTML = '<div class="note">在线地图资源未加载（可能离线）。离线仍可正常语音播报。</div>'; return; }
-    userIcon = L.icon({iconUrl:"https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png", iconSize:[25,41], iconAnchor:[12,41]});
-    map = L.map("map").setView([29.9, 118.4], 8);
-    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {attribution:'© OpenStreetMap'}).addTo(map);
-    L.polyline(WAYPOINTS, {color:"#4f8bff", weight:3, dashArray:"6 6"}).addTo(map);
-    ["a","h","f","t","s"].forEach(function(t){ layers[t] = L.layerGroup().addTo(map); });
-    POI.forEach(function(p){ addMarker(p); });
-    addLegend();
-    setTimeout(function(){ if (map) map.invalidateSize(); }, 150);
-  }catch(e){
-    document.getElementById("map").innerHTML = '<div class="note">地图加载失败，不影响语音播报。</div>';
-  }
+  if(!window.AMap || map) return;
+  map=new AMap.Map("map",{resizeEnable:true,zoom:8,center:[118.4,29.9],viewMode:"2D"});
+  ["a","h","f","t","s"].forEach(function(t){layers[t]=[];});
+  POI.forEach(function(p){addMarker(p);});
+  addLegend();
+  setTimeout(function(){if(map) map.setFitView();},300);
 }
-function isTopSpot(p){ return p.type==="a" && p.rate!=null && p.rate>=4.7; }
-function markerBadge(p){
-  if (p.type==="a"){
-    if (announced[p.id]) return '<div style="width:30px;height:30px;border-radius:50%;background:#35d0a0;color:#0b3d30;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55)">★'+(p.rate!=null?p.rate:"")+'</div>';
-    if (isTopSpot(p)) return '<div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(160deg,#ffd24d,#ffb84d);color:#5a3d00;font-size:13px;font-weight:800;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 0 0 3px #ffb84d66,0 2px 6px rgba(0,0,0,.5)">★'+(p.rate!=null?p.rate:"")+'</div>';
-    return '<div style="width:26px;height:26px;border-radius:50%;background:#ff6b6b;color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55)">景</div>';
-  }
-  var col = announced[p.id] ? "#35d0a0" : (TYPE_COLOR[p.type] || "#9cc0ff");
-  var big = (p.type==="h" || p.type==="f");
-  var size = big ? 24 : 18;
-  return '<div style="width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+col+';color:#152238;font-size:'+(big?11:10)+'px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55)">'+(TYPE_LABEL[p.type]||"")+'</div>';
+
+function escapeHtml(s){return String(s||"").replace(/[&<>\"]/g,function(ch){return {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[ch]||ch;});}
+function isTopSpot(p){return p.type==="a" && p.rate!=null && p.rate>=4.7;}
+
+function markerContent(p){
+  var txt=TYPE_LABEL[p.type]||"";
+  var color=announced[p.id]?"#35d0a0":(TYPE_COLOR[p.type]||"#9cc0ff");
+  var size=(p.type==="h"||p.type==="f")?30:26;
+  if(p.type==="a" && isTopSpot(p)) return '<div style="width:34px;height:34px;border-radius:50%;background:#ffd24d;color:#5a3d00;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 0 0 3px #ffb84d66">★'+(p.rate||"")+'</div>';
+  return '<div style="width:'+size+'px;height:'+size+'px;border-radius:50%;background:'+color+';color:#152238;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 1px 5px rgba(0,0,0,.55)">'+txt+'</div>';
 }
+
 function addMarker(p){
-  if (!map || !layers[p.type]) return;
-  var ic = L.divIcon({className:"", html:markerBadge(p), iconSize:[40,40], iconAnchor:[20,20]});
-  var m = L.marker([p.lat, p.lng], {icon:ic}).addTo(layers[p.type]);
-  var rateHtml = (p.rate!=null) ? '<b style="color:#ffb84d">★'+p.rate+'</b> ' : '';
-  var introHtml = (p.intro) ? '<div style="margin:6px 0 4px;font-size:12px;color:#e8eefc;line-height:1.6">'+p.intro+'</div>' : '';
-  m.bindPopup('<b>'+p.name+'</b> '+rateHtml+'<br style="font-size:4px">'+introHtml+
-    '<div style="font-size:11px;color:#93a5cf">'+(p.desc||"")+' · Day'+p.day+' · 触发半径约'+p.r+'km'+(p.tip?" · "+p.tip:"")+'</div>');
-  m.on("click", function(){ spotSpeak(p); });
-  mkrList[p.id] = m;
+  if(!map) return;
+  var m=new AMap.Marker({position:[p.lng,p.lat],content:markerContent(p),offset:new AMap.Pixel(-17,-17)});
+  m.setMap(map);
+  var rate=p.rate!=null?' <b style="color:#ffb84d">★'+p.rate+'</b> ':'';
+  var extra=(p.intro||p.say||"");
+  var meta=(p.desc||"")+" · Day"+p.day;
+  m.setContent(markerContent(p));
+  m.on("click",function(){
+    var info=new AMap.InfoWindow({offset:new AMap.Pixel(0,-20),content:'<div style="color:#222;max-width:320px"><b>'+escapeHtml(p.name)+'</b>'+rate+'<div style="margin-top:6px;line-height:1.5">'+escapeHtml(extra)+'</div><div style="margin-top:6px;color:#666;font-size:11px">'+escapeHtml(meta)+'</div></div>'});
+    info.open(map,m.getPosition());
+    spotSpeak(p);
+  });
+  mkrList[p.id]=m;
 }
-function setMarker(p, state){
-  if (!map || !mkrList[p.id]) return;
+
+function updateUserMarker(c){
+  if(!map || !c) return;
+  if(mkrUser) mkrUser.setPosition([c.lng,c.lat]);
+  else {
+    mkrUser=new AMap.Marker({position:[c.lng,c.lat],content:'<div style="width:18px;height:18px;border-radius:50%;background:#1677ff;border:4px solid #fff;box-shadow:0 0 0 3px #1677ff66"></div>',offset:new AMap.Pixel(-9,-9),zIndex:999});
+    mkrUser.setMap(map);
+  }
 }
+
+function refreshMarker(p){
+  var m=mkrList[p.id]; if(m) m.setContent(markerContent(p));
+}
+function setMarker(p,state){refreshMarker(p);}
+
+function drawAmapRoute(path){
+  if(!map || !window.AMap || !path || path.length<2) return;
+  if(routeLine) routeLine.setMap(null);
+  var linePath=path.map(function(q){return [q.lng,q.lat];});
+  routeLine=new AMap.Polyline({path:linePath,strokeColor:"#1677ff",strokeWeight:6,strokeOpacity:0.85,lineJoin:"round",showDir:true});
+  routeLine.setMap(map);
+  try{ map.setFitView([routeLine],false,[30,30,30,30]); }catch(e){ map.setFitView(); }
+}
+
 function addLegend(){
-  var lc = L.control({position:"bottomleft"});
-  lc.onAdd = function(){
-    var div = L.DomUtil.create("div", "maplegend");
-    div.style.background = "rgba(15,23,42,.92)";
-    div.style.border = "1px solid #2c3e6b";
-    div.style.borderRadius = "10px";
-    div.style.padding = "8px 10px";
-    div.style.fontSize = "12px";
-    div.style.color = "#e8eefc";
-    div.style.lineHeight = "2";
-    var rows = ["a","h","f","t","s"].map(function(t){
-      return '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap">'+
-        '<input type="checkbox" checked data-t="'+t+'" style="width:14px;height:14px">'+
-        '<span style="color:'+TYPE_COLOR[t]+'">●</span> '+TYPE_TXT[t]+'</label>';
-    }).join("");
-    div.innerHTML = 
-      '<div id="lgHead" style="display:flex;align-items:center;justify-content:space-between;gap:16px;cursor:pointer;font-weight:700">'+
-        '<span>图例（金色★=高分）</span><span id="lgArrow" style="color:#93a5cf">▾</span></div>'+
-      '<div id="lgBody">'+rows+
-      '<div style="font-size:11px;color:#93a5cf;margin-top:4px;border-top:1px dashed #2c3e6b;padding-top:4px">点标注或列表可语音介绍；右上角⛶可全屏地图</div></div>';
-    div.querySelector("#lgHead").addEventListener("click", function(){
-      var body = div.querySelector("#lgBody");
-      var hidden = (body.style.display === "none");
-      body.style.display = hidden ? "" : "none";
-      div.querySelector("#lgArrow").textContent = hidden ? "▾" : "▸";
-    });
-    div.querySelectorAll("input").forEach(function(cb){
-      cb.addEventListener("change", function(){
-        var l = layers[cb.getAttribute("data-t")];
-        if (!l) return;
-        if (cb.checked) map.addLayer(l); else map.removeLayer(l);
-      });
-    });
-    return div;
-  };
-  lc.addTo(map);
+  // 简化为地图左下角原生自定义控件
+  if(!map) return;
+  var div=document.createElement("div");
+  div.style.cssText="background:rgba(15,23,42,.92);border:1px solid #2c3e6b;border-radius:10px;padding:8px 10px;font-size:12px;color:#e8eefc;line-height:1.9;box-shadow:0 2px 6px rgba(0,0,0,.25);";
+  div.innerHTML='<b>图例</b><div>景点 · 住宿 · 美食 · 途经 · 服务区</div><div style="font-size:11px;color:#93a5cf">蓝线=高德真实驾车路线</div>';
+  if(AMap.ControlBar) map.addControl(new AMap.ControlBar({position:{top:"10px",right:"10px"}}));
+  map.getContainer().appendChild(div);
+  div.style.position="absolute"; div.style.left="10px"; div.style.bottom="10px"; div.style.zIndex="999";
 }
 
 /* ================= 全屏地图 ================= */
 function initFullscreen(){
   var zoomBtn = document.getElementById("btnZoom");
-  if (!zoomBtn || !window.L) return;
+  if (!zoomBtn) return;
   zoomBtn.style.display = "block";
   var ov = document.createElement("div");
   ov.id = "fsOverlay";
@@ -903,22 +1069,22 @@ function initFullscreen(){
   document.body.appendChild(ov);
   document.getElementById("btnCloseFs").addEventListener("click", closeFullscreen);
   window.addEventListener("resize", function(){
-    if (map && document.getElementById("fsOverlay").style.display !== "none") map.invalidateSize();
+    if (map && document.getElementById("fsOverlay").style.display !== "none") map.resize();
   });
 }
 function openFullscreen(){
-  var ov = document.getElementById("fsOverlay");
-  if (!ov || !map) return;
+  var ov=document.getElementById("fsOverlay");
+  if(!ov||!map) return;
   document.getElementById("fsMapHolder").appendChild(document.getElementById("map"));
-  ov.style.display = "block";
-  setTimeout(function(){ map.invalidateSize(); }, 40);
+  ov.style.display="block";
+  setTimeout(function(){if(map) map.resize();},80);
 }
 function closeFullscreen(){
-  var ov = document.getElementById("fsOverlay");
-  if (!ov || !map) return;
+  var ov=document.getElementById("fsOverlay");
+  if(!ov||!map) return;
   document.getElementById("mapWrap").appendChild(document.getElementById("map"));
-  ov.style.display = "none";
-  setTimeout(function(){ map.invalidateSize(); }, 40);
+  ov.style.display="none";
+  setTimeout(function(){if(map) map.resize();},80);
 }
 
 /* ================= 初始化 ================= */
@@ -952,14 +1118,20 @@ nearCard.className = "card";
 nearCard.innerHTML = '<h4>附近点位（按距离）</h4><div id="nearItems"><div class="note">定位生效后自动刷新。</div></div>';
 logCard.parentNode.insertBefore(nearCard, logCard);
 
-buildRouteModel();
-ensureRouteMeta();
+var stageSel=document.getElementById("stageSel");
+if(stageSel){
+  stageSel.addEventListener("change",function(){
+    stageKey=stageSel.value||"auto";
+    clearRealRoute();
+    if(amapReady && currentPos()) maybeRefreshAmapRoute(true);
+  });
+}
 fillSim();
 fillVoices();
 setTimeout(fillVoices, 500);
 renderAll();
-initMap();
 initFullscreen();
+loadAMap();
 
 // 每 5 秒刷新一次
 setInterval(doTick, 5000);
