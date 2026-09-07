@@ -58,7 +58,7 @@
   select{width:100%;background:var(--card2);color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:9px;font-size:14px;margin:6px 0}
   #map{height:42vh;border-radius:12px;border:1px solid var(--line);margin-bottom:10px}
   #mapWrap{position:relative}
-  #btnZoom{position:absolute;top:8px;right:8px;z-index:999;background:rgba(15,23,42,.85);border:1px solid #2c3e6b;color:#e8eefc;border-radius:8px;padding:5px 11px;font-size:12px;display:none}
+  #btnZoom{position:absolute;top:8px;right:8px;z-index:1001;background:#4f8bff;border:2px solid #fff;color:#fff;font-weight:700;border-radius:10px;padding:7px 14px;font-size:14px;box-shadow:0 2px 8px rgba(0,0,0,.45)}
   #fsOverlay{position:fixed;left:0;top:0;right:0;bottom:0;z-index:10000;background:#0f172a;display:none}
   #fsBar{height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 12px;background:linear-gradient(135deg,#13214d,#0f2a5c);border-bottom:1px solid #2c3e6b;color:#e8eefc;font-size:14px;font-weight:600}
   #fsBar button{background:#b3403d;border:none;color:#fff;border-radius:8px;padding:7px 14px;font-size:13px}
@@ -766,7 +766,7 @@ function addLegend(){
 function initFullscreen(){
   var zoomBtn = document.getElementById("btnZoom");
   if (!zoomBtn || !window.L) return;
-  zoomBtn.style.display = "";
+  zoomBtn.style.display = "block";
   var ov = document.createElement("div");
   ov.id = "fsOverlay";
   ov.innerHTML = '<div id="fsBar"><b>🗺 全屏地图</b><button id="btnCloseFs">✕ 退出</button></div><div id="fsMapHolder"></div>';
